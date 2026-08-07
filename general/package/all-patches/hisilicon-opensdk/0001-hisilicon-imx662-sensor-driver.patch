@@ -1,0 +1,1725 @@
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile b/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile
+@@ -0,0 +1,35 @@
++LIB_NAME := libsns_imx662
++
++ISP_DIR := $(CURDIR)/../../../isp
++KO_DIR  := $(CURDIR)/../../../../kernel
++COMMON  := $(CURDIR)/../common
++
++override CFLAGS += -fPIC -Wall -O2 \
++	-I$(ISP_DIR)/include/hi3516cv6xx \
++	-I$(ISP_DIR)/include/hi3516cv6xx/3a \
++	-I$(ISP_DIR)/include/hi3516cv6xx/ext_inc \
++	-I$(KO_DIR)/include/hi3516cv6xx \
++	-I$(KO_DIR)/include/hi3516cv6xx/exp_inc \
++	-I$(KO_DIR)/include/hi3516cv6xx/module \
++	-I$(COMMON) \
++	-I.
++
++SRCS := $(wildcard *.c) $(COMMON)/sensor_common.c
++OBJS := $(notdir $(SRCS:%.c=%.o))
++
++all: $(LIB_NAME).so $(LIB_NAME).a
++
++%.o: %.c
++	$(CC) $(CFLAGS) -c $< -o $@
++
++%.o: $(COMMON)/%.c
++	$(CC) $(CFLAGS) -c $< -o $@
++
++$(LIB_NAME).so: $(OBJS)
++	$(CC) -shared -o $@ $(OBJS)
++
++$(LIB_NAME).a: $(OBJS)
++	$(AR) -rcs $@ $(OBJS)
++
++clean:
++	-rm -f $(OBJS) $(LIB_NAME).so $(LIB_NAME).a
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h
+@@ -0,0 +1,50 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_CFG_H_
++#define IMX662_CFG_H_
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++#include "sensor_common.h"
++
++/* IMX662 AllPixel mode global init sequence (written once at cmos_isp_init).
++ * Mode-specific registers (HMAX, DATARATE_SEL, LANEMODE, ADBIT, MDBIT)
++ * are configured per-mode in imx662_cmos.c set_image_mode function. */
++static const cis_reg_cfg g_imx662_init_seq[] = {
++    {0x3000, 0x01},    /* enter standby */
++    {0x3001, 0x00},    /* REGHOLD release */
++    {0x3002, 0x01},    /* XMSTA start */
++    {0x30A4, 0x02},    /* XVSOUTSEL */
++    {0x30DC, 0x32},    /* BLKLEVEL */
++    {0x3444, 0xAC},    /* PLL_ctrl1 */
++    {0x3445, 0x09},    /* PLL_ctrl2 */
++    {0x3446, 0x01},    /* PLL_ctrl3 */
++    {0x349E, 0x05},    /* MIPI_TX_CTRL1 */
++    {0x349F, 0x19},    /* MIPI_TX_CTRL2 */
++    {0x34A0, 0x00},    /* MIPI_TX_CTRL3 */
++    {0x34A1, 0x01},    /* MIPI_TX_CTRL4 */
++    {0x34A2, 0x92},    /* MIPI_PHY_Tx1 */
++    {0x34A4, 0x91},    /* MIPI_PHY_Tx2 */
++    {0x34A6, 0x8C},    /* MIPI_PHY_Tx3 */
++    {0x34A8, 0x87},    /* MIPI_PHY_Tx4 */
++    {0x34AA, 0x82},    /* MIPI_PHY_Tx5 */
++    {0x34AC, 0x78},    /* MIPI_PHY_Tx6 */
++    {0x34AE, 0x6E},    /* MIPI_PHY_Tx7 */
++    {0x3014, 0x03},    /* INCK_SEL = 3 (27MHz, board MCLK) */
++};
++
++#define IMX662_INIT_SEQ_LEN   (sizeof(g_imx662_init_seq) / sizeof(g_imx662_init_seq[0]))
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif
++
++#endif /* IMX662_CFG_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
+@@ -0,0 +1,135 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_CMOS_H_
++#define IMX662_CMOS_H_
++
++#include "ot_common_isp.h"
++#include "ot_sns_ctrl.h"
++#include "securec.h"
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++/* sensor ID & resolution */
++#define IMX662_ID               662
++#define IMX662_WIDTH            1920
++#define IMX662_HEIGHT           1080
++#define IMX662_SENSOR_W         1920
++#define IMX662_SENSOR_H         1080
++
++/* vmax (fixed 1250 for all-pixel modes), hmax per mode */
++#define IMX662_VMAX_DEFAULT     1250
++#define IMX662_HMAX_1080P_30FPS 1980
++
++/* register bits */
++#define IMX662_STANDBY_ENTER    0x01
++#define IMX662_STANDBY_EXIT     0x00
++#define IMX662_WINMODE_ALLPIXEL 0x00
++#define IMX662_ADBIT_10BIT      0x00
++#define IMX662_ADBIT_12BIT      0x01
++#define IMX662_MDBIT_10BIT      0x00
++#define IMX662_MDBIT_12BIT      0x01
++#define IMX662_DATARATE_720     0x06
++#define IMX662_LANEMODE_1LANE   0x00
++#define IMX662_LANEMODE_4LANE   0x03
++#define IMX662_REG_MIRROR_FLIP  0x3030
++#define IMX662_MIRROR_NORMAL    0x00
++
++/* i2c bus config */
++#define IMX662_I2C_ADDR         0x34
++#define IMX662_ADDR_BYTE        2
++#define IMX662_DATA_BYTE        1
++
++/* frame lines */
++#define IMX662_FULL_LINES_MAX   0xFFFF
++#define IMX662_INCREASE_LINES   1
++#define IMX662_VMAX_VAL         1250
++#define IMX662_VMAX             (IMX662_VMAX_VAL + IMX662_INCREASE_LINES)
++#define IMX662_FPS_MAX          10.0f
++#define IMX662_FPS_MIN          1.0f
++#define IMX662_MODE_LINEAR      0
++
++/* ae configs */
++#define IMX662_AGAIN_MIN        1024
++#define IMX662_AGAIN_MAX        32768
++#define IMX662_DGAIN_MIN        1024
++#define IMX662_DGAIN_MAX        16384
++
++#define ISP_DGAIN_SHIFT         8
++#define ISP_DGAIN_TARGET_MIN    1
++#define ISP_DGAIN_TARGET_MAX    128
++#define INT_TIME_ACCURACY       1
++#define AGAIN_ACCURACY          1
++#define DGAIN_ACCURACY          0.015625
++
++#define FL_OFFSET_LINEAR        4
++
++/* awb calibrate configs (placeholders until tuned) */
++#define CALIBRATE_STATIC_TEMP       5000
++#define CALIBRATE_STATIC_WB_R_GAIN  256
++#define CALIBRATE_STATIC_WB_GR_GAIN 256
++#define CALIBRATE_STATIC_WB_GB_GAIN 256
++#define CALIBRATE_STATIC_WB_B_GAIN  256
++
++#define CALIBRATE_AWB_P1 0
++#define CALIBRATE_AWB_P2 256
++#define CALIBRATE_AWB_Q1 0
++#define CALIBRATE_AWB_A1 11800
++#define CALIBRATE_AWB_B1 10240
++#define CALIBRATE_AWB_C1 0
++
++#define GOLDEN_RGAIN             0
++#define GOLDEN_BGAIN             0
++
++/* other configs */
++#define STANDARD_FPS             30
++#define FLICKER_FREQ             (50 * 256)
++#define INIT_EXP_DEFAULT         4000
++#define MAX_INT_TIME_TARGET      65535
++#define AE_COMENSATION_DEFAULT   0x40
++
++/* black level */
++#define BLACK_LEVEL_DEFAULT      0x100
++
++/* assist macros */
++#define higher_4bits(x) (((x) & 0xf0000) >> 16)
++#define high_8bits(x)   (((x) & 0xff00) >> 8)
++#define low_8bits(x)    ((x) & 0x00ff)
++
++/* sensor modes */
++typedef enum {
++    IMX662_1080P_30FPS_12BIT_1LANE_MODE = 0,
++    IMX662_1080P_60FPS_12BIT_1LANE_MODE,
++    IMX662_MODE_MAX
++} imx662_res_mode;
++
++/* register array index for per-frame updates */
++typedef enum {
++    PAGE_IDX = 0,
++    EXP_REG_MSB_IDX,
++    EXP_REG_MID_IDX,
++    EXP_REG_LSB_IDX,
++    VMAX_REG_MSB_IDX,
++    VMAX_REG_MID_IDX,
++    VMAX_REG_LSB_IDX,
++    AGAIN_REG_LSB_IDX,
++    AGAIN_REG_MSB_IDX,
++    DGAIN_REG_LSB_IDX,
++    DGAIN_REG_MSB_IDX,
++    VALUE_IDX,
++    REG_MAX_IDX
++} imx662_linear_reg_index;
++
++ot_isp_sns_obj *imx662_get_obj(td_void);
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif /* End of #ifdef __cplusplus */
++#endif /* IMX662_CMOS_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
+@@ -0,0 +1,169 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_CMOS_PARAM_H_
++#define IMX662_CMOS_PARAM_H_
++
++#include "ot_common_awb.h"
++#include "ot_common_isp.h"
++#include "ot_common_sns.h"
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++/* ISP dgain target range */
++#define IMX662_ISP_DGAIN_TARGET_MIN      1
++#define IMX662_ISP_DGAIN_TARGET_MAX      128
++
++static ot_isp_piris_attr g_piris = {
++    0,   /* bStepFNOTableChange */
++    1,   /* bZeroIsMax */
++    94,  /* u16TotalStep */
++    62,  /* u16StepCount */
++    /* Step-F number mapping table. F1.0 is 1024 and F32.0 is 1 */
++    { 30,  35,  40,  45,  50,  56,  61,  67,  73,  79,  85,  92,  98,  105, 112, 120, 127, 135, 143, 150, 158,
++      166, 174, 183, 191, 200, 208, 217, 225, 234, 243, 252, 261, 270, 279, 289, 298, 307, 316, 325, 335, 344,
++      353, 362, 372, 381, 390, 399, 408, 417, 426, 435, 444, 453, 462, 470, 478, 486, 493, 500, 506, 512 },
++    OT_ISP_IRIS_F_NO_1_4,   /* enMaxIrisFNOTarget */
++    OT_ISP_IRIS_F_NO_5_6,   /* enMinIrisFNOTarget */
++    1,
++    512,
++    32
++};
++
++static const ot_isp_cmos_black_level g_cmos_blc = {
++    TD_FALSE, /* user_black_level_en */
++    {
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++    },   /* user_black_level */
++    OT_ISP_BLACK_LEVEL_MODE_AUTO, /* ot_isp_black_level_mode */
++    {
++        {
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++        },
++    }, /* manual_attr */
++};
++
++/* AWB CCM calibration - placeholder, populate from IMX662 tuning data */
++static ot_isp_awb_ccm g_awb_ccm = {
++    4,
++    {
++        {
++            6473,
++            { 0x017b, 0x8076, 0x8005, 0x8042, 0x017f, 0x803d, 0x000b, 0x8097, 0x018c },
++        },
++        {
++            5132,
++            { 0x0189, 0x809f, 0x0016, 0x8037, 0x013c, 0x8005, 0x001f, 0x80d7, 0x01b8 },
++        },
++        {
++            3565,
++            { 0x0190, 0x8075, 0x801b, 0x8053, 0x0186, 0x8033, 0x0025, 0x80ca, 0x01a5 },
++        },
++        {
++            2580,
++            { 0x01b5, 0x80aa, 0x800b, 0x8050, 0x0153, 0x8003, 0x0048, 0x812d, 0x01e5 },
++        },
++    },
++};
++
++static ot_isp_awb_agc_table g_awb_agc_table = {
++    1, /* bvalid */
++    { 0x80, 0x76, 0x70, 0x6C, 0x69, 0x66, 0x5A, 0x4E, 0x44, 0x40, 0x38, 0x38, 0x38, 0x38, 0x38, 0x38 }
++};
++
++/* ISP default config - linear mode */
++#define IMX662_LINEAR_FRAMERATE                    10
++#define IMX662_FULL_LINES_MAX                      0xFFFF
++
++/* AE */
++#define IMX662_AGAIN_MIN                             1024   /* min analog gain = 1x */
++#define IMX662_AGAIN_MAX                           32768    /* max analog gain, sensor specific */
++#define IMX662_AGAIN_STEP                            16
++#define IMX662_DGAIN_MIN                             1024   /* min digital gain = 1x */
++#define IMX662_DGAIN_MAX                           16384    /* max digital gain */
++#define IMX662_DGAIN_STEP                            16
++#define IMX662_ISP_DGAIN_SHIFT                       8
++#define IMX662_AE_COMPENSATION_DEFAULT              0x40
++#define IMX662_AE_EXP_MODE                     OT_ISP_AE_EXP_HIGHLIGHT_PRIOR
++
++#define IMX662_INT_TIME_ACCURACY                     1
++#define IMX662_AGAIN_ACCURACY                        1
++#define IMX662_DGAIN_ACCURACY                     0.015625
++#define IMX662_FL_OFFSET_LINEAR                          4
++#define IMX662_FL_OFFSET_WDR_SHORT                     4
++#define IMX662_FL_OFFSET_WDR_LONG                      4
++#define IMX662_MAX_INT_TIME_TARGET               65535
++
++/* Piris (iris) */
++#define IMX662_PIRIS_ATTR                             OT_ISP_IRIS_HW
++
++/* Black level */
++#define IMX662_BLACK_LEVEL_DEFAULT                      0x100
++#define IMX662_BLACK_LEVEL_MIN                          0x000
++#define IMX662_BLACK_LEVEL_MAX                          0xFFF
++
++/* DNG/WB calibration - placeholders, need to be populated from sensor datasheet */
++#define IMX662_CALIBRATE_STATIC_TEMP              5000
++#define IMX662_CALIBRATE_STATIC_WB_R_GAIN         256
++#define IMX662_CALIBRATE_STATIC_WB_GR_GAIN        256
++#define IMX662_CALIBRATE_STATIC_WB_GB_GAIN        256
++#define IMX662_CALIBRATE_STATIC_WB_B_GAIN         256
++
++#define IMX662_CALIBRATE_AWB_P1                     0
++#define IMX662_CALIBRATE_AWB_P2                     256
++#define IMX662_CALIBRATE_AWB_Q1                     0
++#define IMX662_CALIBRATE_AWB_A1                11800
++#define IMX662_CALIBRATE_AWB_B1                10240
++#define IMX662_CALIBRATE_AWB_C1                        0
++
++#define IMX662_GOLDEN_RGAIN                         0
++#define IMX662_GOLDEN_BGAIN                         0
++
++/* WDR */
++#define IMX662_WDR_MODE_NONE                  OT_WDR_MODE_NONE
++#define IMX662_WDR_MODE_SHORT             OT_WDR_MODE_SHORT
++#define IMX662_WDR_MODE_LONG                 OT_WDR_MODE_LONG
++
++/* Input clock */
++#define IMX662_INPUT_CLOCK                       27000000
++
++/* VMAX register addresses (20-bit, 3 bytes) */
++#define IMX662_VMAX_REG_LSB                          0x3028
++#define IMX662_VMAX_REG_MID                          0x3029
++#define IMX662_VMAX_REG_MSB                          0x302A
++
++/* HMAX register addresses (12-bit, 2 bytes) */
++#define IMX662_HMAX_REG_LSB                          0x302C
++#define IMX662_HMAX_REG_MSB                          0x302D
++
++/* Exposure register */
++#define IMX662_EXP_REG_LSB                          0x3050
++#define IMX662_EXP_REG_MID                          0x3051
++#define IMX662_EXP_REG_MSB                          0x3052
++
++/* Global gain registers (analog, 16-bit) */
++#define IMX662_AGAIN_REG_LSB                       0x3070
++#define IMX662_AGAIN_REG_MSB                       0x3071
++
++/* Digital gain registers (16-bit) */
++#define IMX662_DGAIN_REG_LSB                       0x0910
++#define IMX662_DGAIN_REG_MSB                       0x0911
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif
++
++#endif /* IMX662_CMOS_PARAM_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
+@@ -0,0 +1,33 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_SENSOR_CTRL_H_
++#define IMX662_SENSOR_CTRL_H_
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++#include "sensor_common.h"
++
++/* write init sequence from cfg table */
++td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len);
++
++/* per-mode linear init: writes global seq + mode-specific registers */
++td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
++    td_u8 adbit, td_u8 mdbit);
++
++/* standby / restart (restart re-applies mode timing) */
++td_s32 imx662_standby_mode(cis_info *cis);
++td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate);
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif
++
++#endif /* IMX662_SENSOR_CTRL_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
+@@ -0,0 +1,211 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#include "sensor_common.h"
++#include "imx662_cmos.h"
++#include "imx662_cfg.h"
++
++static void imx662_default_reg_init(cis_info *cis)
++{
++    td_u32 i;
++    td_s32 ret = TD_SUCCESS;
++    ot_isp_sns_state *past_sensor = TD_NULL;
++
++    past_sensor = cis->sns_state;
++    for (i = 0; i < past_sensor->regs_info[0].reg_num; i++) {
++        ret += cis_write_reg(&cis->i2c,
++            past_sensor->regs_info[0].i2c_data[i].reg_addr,
++            past_sensor->regs_info[0].i2c_data[i].data);
++    }
++
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write register failed!\n");
++    }
++    return;
++}
++
++td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len)
++{
++    td_u32 i;
++
++    for (i = 0; i < len; i++) {
++        sns_check_return(cis_write_reg(&cis->i2c, cfg->addr, cfg->data));
++        cfg++;
++    }
++
++    imx662_default_reg_init(cis);
++
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
++    td_u8 adbit, td_u8 mdbit)
++{
++    td_s32 ret;
++    td_u32 len;
++    const cis_reg_cfg *cfg = g_imx662_init_seq;
++
++    sns_check_pointer_return(cis);
++
++    len = IMX662_INIT_SEQ_LEN;
++    ret = imx662_reg_init(cis, cfg, len);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662_reg_init failed!\n");
++        return ret;
++    }
++
++    /* Mode-specific registers */
++    /* DATARATE_SEL */
++    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3015 failed!\n");
++        return ret;
++    }
++
++    /* WINMODE */
++    ret = cis_write_reg(&cis->i2c, 0x3018, IMX662_WINMODE_ALLPIXEL);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3018 failed!\n");
++        return ret;
++    }
++
++    /* LANEMODE */
++    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3040 failed!\n");
++        return ret;
++    }
++
++    /* ADBIT */
++    ret = cis_write_reg(&cis->i2c, 0x3022, adbit);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3022 failed!\n");
++        return ret;
++    }
++
++    /* MDBIT */
++    ret = cis_write_reg(&cis->i2c, 0x3023, mdbit);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3023 failed!\n");
++        return ret;
++    }
++
++    /* HMAX */
++    ret = cis_write_reg(&cis->i2c, 0x302C, (hmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302C failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302D, hmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302D failed!\n");
++        return ret;
++    }
++
++    /* VMAX */
++    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3028 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3029 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302A failed!\n");
++        return ret;
++    }
++
++    /* Exit standby */
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3000 exit standby failed!\n");
++        return ret;
++    }
++
++    /* Mirror normal */
++    ret = cis_write_reg(&cis->i2c, IMX662_REG_MIRROR_FLIP, IMX662_MIRROR_NORMAL);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write mirror/flip failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_standby_mode(cis_info *cis)
++{
++    td_s32 ret;
++    sns_check_pointer_return(cis);
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write standby failed!\n");
++        return ret;
++    }
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate)
++{
++    td_s32 ret;
++    sns_check_pointer_return(cis);
++
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write standby failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write DATARATE_SEL failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write LANEMODE failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x302C, (hmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write HMAX high failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302D, hmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write HMAX low failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX low failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX mid failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX high failed!\n");
++        return ret;
++    }
++
++    cis_delay_ms(1);
++
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write exit standby failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c
+new file mode 100644
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c
+@@ -0,0 +1,1057 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#include <stdio.h>
++#include <math.h>
++#include "sensor_common.h"
++#include "ot_mpi_isp.h"
++#include "ot_mpi_ae.h"
++#include "ot_mpi_awb.h"
++#include "imx662_cmos.h"
++#include "imx662_cmos_param.h"
++#include "imx662_cfg.h"
++#include "imx662_sensor_ctrl.h"
++
++static td_s32 cmos_get_ae_default(ot_vi_pipe vi_pipe, ot_isp_ae_sensor_default *ae_sns_dft);
++static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_default *ae_sns_dft);
++static td_void cmos_slow_framerate_set(ot_vi_pipe vi_pipe, td_u32 full_lines, ot_isp_ae_sensor_default *ae_sns_dft);
++static td_void cmos_inttime_update(ot_vi_pipe vi_pipe, td_u32 int_time);
++static td_void cmos_again_calc_table(ot_vi_pipe vi_pipe, td_u32 *pu32_again_lin, td_u32 *pu32_again_db);
++static td_void cmos_gains_update(ot_vi_pipe vi_pipe, td_u32 pu32_again, td_u32 pu32_dgain);
++static td_void cmos_init_sensor_exp_function(ot_isp_sns_exp_func *sensor_exp_func);
++
++/****************************************************************************
++ * global variables                                                            *
++ ****************************************************************************/
++static cis_info g_imx662_info[OT_ISP_MAX_PIPE_NUM] = {
++    [0 ... (OT_ISP_MAX_PIPE_NUM - 1)] = {
++        .mutex = PTHREAD_MUTEX_INITIALIZER,
++        .sns_id = IMX662_ID,
++        .fswdr_mode = OT_ISP_FSWDR_NORMAL_MODE,
++        .quick_start_en = TD_FALSE,
++        .fast_ae_en = TD_FALSE,
++        .bus_info = { .i2c_dev = -1 },
++        .sns_state = TD_NULL,
++        .blc_clamp_info = TD_TRUE,
++        .mode_tbl = {
++            {
++                IMX662_VMAX_DEFAULT,
++                IMX662_FULL_LINES_MAX,
++                IMX662_FPS_MAX,
++                IMX662_FPS_MIN,
++                IMX662_SENSOR_W,
++                IMX662_SENSOR_H,
++                IMX662_1080P_30FPS_12BIT_1LANE_MODE,
++                OT_WDR_MODE_NONE,
++                "IMX662_1080P_30FPS_12BIT_1LANE"
++            },
++            {
++                IMX662_VMAX_DEFAULT,
++                IMX662_FULL_LINES_MAX,
++                IMX662_FPS_MAX,
++                IMX662_FPS_MIN,
++                IMX662_SENSOR_W,
++                IMX662_SENSOR_H,
++                IMX662_1080P_60FPS_12BIT_1LANE_MODE,
++                OT_WDR_MODE_NONE,
++                "IMX662_1080P_60FPS_12BIT_1LANE"
++            },
++        },
++        .i2c.fd = -1,
++    }
++};
++
++/****************************************************************************
++ * common functions                                                         *
++ ****************************************************************************/
++static cis_info *cmos_get_info(ot_vi_pipe vi_pipe)
++{
++    if (vi_pipe < 0 || vi_pipe >= OT_ISP_MAX_PIPE_NUM) {
++        return TD_NULL;
++    }
++    return &g_imx662_info[vi_pipe];
++}
++
++static ot_isp_sns_state *cmos_get_state(ot_vi_pipe vi_pipe)
++{
++    if (vi_pipe < 0 || vi_pipe >= OT_ISP_MAX_PIPE_NUM) {
++        return TD_NULL;
++    }
++    return cmos_get_info(vi_pipe)->sns_state;
++}
++
++static void cmos_err_mode_print(const ot_isp_cmos_sns_image_mode *sns_image_mode, const ot_isp_sns_state *sns_state)
++{
++    isp_err_trace("Not support! Width:%u, Height:%u, Fps:%f, WDRMode:%d\n",
++        (sns_image_mode)->width, (sns_image_mode)->height, (sns_image_mode)->fps, (sns_state)->wdr_mode);
++}
++
++static td_void cmos_get_inttime_max(ot_vi_pipe vi_pipe, td_u16 man_ratio_enable, td_u32 *ratio,
++    ot_isp_ae_int_time_range *int_time, td_u32 *lf_max_int_time)
++{
++    ot_unused(vi_pipe);
++    ot_unused(man_ratio_enable);
++    ot_unused(ratio);
++    ot_unused(int_time);
++    ot_unused(lf_max_int_time);
++
++    return;
++}
++
++/* Only used in LINE_WDR mode */
++static td_void cmos_ae_fswdr_attr_set(ot_vi_pipe vi_pipe, ot_isp_ae_fswdr_attr *ae_fswdr_attr)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++    sns_check_pointer_void_return(ae_fswdr_attr);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    cis->fswdr_mode = ae_fswdr_attr->fswdr_mode;
++    cis->max_time_get_cnt = 0;
++
++    return;
++}
++
++static td_void cmos_ae_quick_start_status_set(ot_vi_pipe vi_pipe, td_bool quick_start_en)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    cis->quick_start_en = quick_start_en;
++}
++
++static td_void cmos_fast_ae_attr_get(ot_vi_pipe vi_pipe, ot_isp_ae_fast_ae_attr *fast_ae_attr)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++    sns_check_pointer_void_return(fast_ae_attr);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++    fast_ae_attr->enable = cis->fast_ae_en;
++    fast_ae_attr->sns_delay_frame = 1 + 2; /* delay 1 + 2 frame */
++}
++
++static td_void cmos_fast_ae_attr_set(ot_vi_pipe vi_pipe, const ot_isp_ae_fast_ae_attr *fast_ae_attr)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++    sns_check_pointer_void_return(fast_ae_attr);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++    cis->fast_ae_en = fast_ae_attr->enable;
++}
++
++static td_s32 cmos_init_ae_exp_function(ot_isp_ae_sensor_exp_func *exp_func)
++{
++    (td_void)memset_s(exp_func, sizeof(ot_isp_ae_sensor_exp_func), 0, sizeof(ot_isp_ae_sensor_exp_func));
++
++    exp_func->pfn_cmos_get_ae_default     = cmos_get_ae_default;
++    exp_func->pfn_cmos_fps_set            = cmos_fps_set;
++    exp_func->pfn_cmos_slow_framerate_set = cmos_slow_framerate_set;
++    exp_func->pfn_cmos_inttime_update     = cmos_inttime_update;
++    exp_func->pfn_cmos_gains_update       = cmos_gains_update;
++    exp_func->pfn_cmos_again_calc_table   = cmos_again_calc_table;
++    exp_func->pfn_cmos_dgain_calc_table   = TD_NULL;
++    exp_func->pfn_cmos_get_inttime_max    = cmos_get_inttime_max;
++    exp_func->pfn_cmos_ae_fswdr_attr_set  = cmos_ae_fswdr_attr_set;
++    exp_func->pfn_cmos_ae_quick_start_status_set = cmos_ae_quick_start_status_set;
++    exp_func->pfn_cmos_ae_fast_ae_attr_get = cmos_fast_ae_attr_get;
++    exp_func->pfn_cmos_ae_fast_ae_attr_set = cmos_fast_ae_attr_set;
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_awb_get_default(ot_vi_pipe vi_pipe, ot_isp_awb_sensor_default *awb_sns_dft)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(awb_sns_dft);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    (td_void)memset_s(awb_sns_dft, sizeof(ot_isp_awb_sensor_default), 0, sizeof(ot_isp_awb_sensor_default));
++    awb_sns_dft->wb_ref_temp = IMX662_CALIBRATE_STATIC_TEMP;
++
++    awb_sns_dft->gain_offset[0] = IMX662_CALIBRATE_STATIC_WB_R_GAIN;
++    awb_sns_dft->gain_offset[1] = IMX662_CALIBRATE_STATIC_WB_GR_GAIN; /* index 1 */
++    awb_sns_dft->gain_offset[2] = IMX662_CALIBRATE_STATIC_WB_GB_GAIN; /* index 2 */
++    awb_sns_dft->gain_offset[3] = IMX662_CALIBRATE_STATIC_WB_B_GAIN;  /* index 3 */
++
++    awb_sns_dft->wb_para[0] = IMX662_CALIBRATE_AWB_P1;
++    awb_sns_dft->wb_para[1] = IMX662_CALIBRATE_AWB_P2; /* index 1 */
++    awb_sns_dft->wb_para[2] = IMX662_CALIBRATE_AWB_Q1; /* index 2 */
++    awb_sns_dft->wb_para[3] = IMX662_CALIBRATE_AWB_A1; /* index 3 */
++    awb_sns_dft->wb_para[4] = IMX662_CALIBRATE_AWB_B1; /* index 4 */
++    awb_sns_dft->wb_para[5] = IMX662_CALIBRATE_AWB_C1; /* index 5 */
++
++    awb_sns_dft->golden_rgain = IMX662_GOLDEN_RGAIN;
++    awb_sns_dft->golden_bgain = IMX662_GOLDEN_BGAIN;
++
++    switch (sns_state->wdr_mode) {
++        case OT_WDR_MODE_NONE:
++            (td_void)memcpy_s(&awb_sns_dft->ccm, sizeof(ot_isp_awb_ccm), &g_awb_ccm, sizeof(ot_isp_awb_ccm));
++            (td_void)memcpy_s(&awb_sns_dft->agc_tbl, sizeof(ot_isp_awb_agc_table),
++                &g_awb_agc_table, sizeof(ot_isp_awb_agc_table));
++            break;
++        default:
++            (td_void)memcpy_s(&awb_sns_dft->ccm, sizeof(ot_isp_awb_ccm), &g_awb_ccm, sizeof(ot_isp_awb_ccm));
++            (td_void)memcpy_s(&awb_sns_dft->agc_tbl, sizeof(ot_isp_awb_agc_table),
++                &g_awb_agc_table, sizeof(ot_isp_awb_agc_table));
++            break;
++    }
++
++    awb_sns_dft->init_rgain = cis->init_wb_r_gain;
++    awb_sns_dft->init_ggain = cis->init_wb_g_gain;
++    awb_sns_dft->init_bgain = cis->init_wb_b_gain;
++    awb_sns_dft->sample_rgain = cis->sample_r_gain;
++    awb_sns_dft->sample_bgain = cis->sample_b_gain;
++
++    return TD_SUCCESS;
++}
++
++static td_void cmos_init_awb_exp_function(ot_isp_awb_sensor_exp_func *exp_func)
++{
++    (td_void)memset_s(exp_func, sizeof(ot_isp_awb_sensor_exp_func), 0, sizeof(ot_isp_awb_sensor_exp_func));
++
++    exp_func->pfn_cmos_get_awb_default = cmos_awb_get_default;
++
++    return;
++}
++
++static td_void cmos_get_ae_comm_default(cis_info *cis, ot_isp_ae_sensor_default *ae_sns_dft,
++    const ot_isp_sns_state *sns_state)
++{
++    td_float max_fps = IMX662_LINEAR_FRAMERATE;
++
++    ae_sns_dft->full_lines_std = sns_state->fl_std;
++    ae_sns_dft->flicker_freq = FLICKER_FREQ; /* 50Hz, accuracy: 256 */
++    ae_sns_dft->full_lines_max = IMX662_FULL_LINES_MAX;
++    ae_sns_dft->hmax_times = (td_u32)(1000000000ULL / (IMX662_VMAX_DEFAULT * IMX662_LINEAR_FRAMERATE));
++
++    ae_sns_dft->int_time_accu.accu_type = OT_ISP_AE_ACCURACY_LINEAR;
++    ae_sns_dft->int_time_accu.accuracy = IMX662_INT_TIME_ACCURACY;
++    ae_sns_dft->int_time_accu.offset = 0;
++
++    ae_sns_dft->again_accu.accu_type = OT_ISP_AE_ACCURACY_TABLE;
++    ae_sns_dft->again_accu.accuracy = IMX662_AGAIN_ACCURACY;
++
++    ae_sns_dft->dgain_accu.accu_type = OT_ISP_AE_ACCURACY_LINEAR;
++    ae_sns_dft->dgain_accu.accuracy = IMX662_DGAIN_ACCURACY;
++
++    ae_sns_dft->isp_dgain_shift = IMX662_ISP_DGAIN_SHIFT;
++    ae_sns_dft->min_isp_dgain_target = IMX662_ISP_DGAIN_TARGET_MIN << ae_sns_dft->isp_dgain_shift;
++    ae_sns_dft->max_isp_dgain_target = IMX662_ISP_DGAIN_TARGET_MAX << ae_sns_dft->isp_dgain_shift;
++
++    if (cis->lines_per500ms == 0) {
++        ae_sns_dft->lines_per500ms = (td_u32)(IMX662_VMAX_DEFAULT * max_fps / 2);
++    } else {
++        ae_sns_dft->lines_per500ms = cis->lines_per500ms;
++    }
++
++    (td_void)memcpy_s(&ae_sns_dft->piris_attr, sizeof(ot_isp_piris_attr),
++        &g_piris, sizeof(ot_isp_piris_attr));
++    ae_sns_dft->max_iris_fno = OT_ISP_IRIS_F_NO_1_4;
++    ae_sns_dft->min_iris_fno = OT_ISP_IRIS_F_NO_5_6;
++
++    ae_sns_dft->ae_route_ex_valid = TD_FALSE;
++    ae_sns_dft->ae_route_attr.total_num = 0;
++    ae_sns_dft->ae_route_attr_ex.total_num = 0;
++    ae_sns_dft->quick_start.quick_start_enable = cis->quick_start_en;
++    ae_sns_dft->quick_start.black_frame_num = 0;
++    ae_sns_dft->ae_stat_pos = cis->ae_stat_pos;
++}
++
++static td_void cmos_get_ae_linear_default(cis_info *cis, ot_isp_ae_sensor_default *ae_sns_dft,
++    const ot_isp_sns_state *sns_state)
++{
++    ae_sns_dft->max_again = IMX662_AGAIN_MAX;
++    ae_sns_dft->min_again = IMX662_AGAIN_MIN;
++    ae_sns_dft->max_again_target = ae_sns_dft->max_again;
++    ae_sns_dft->min_again_target = ae_sns_dft->min_again;
++
++    ae_sns_dft->max_dgain = IMX662_DGAIN_MAX;
++    ae_sns_dft->min_dgain = IMX662_DGAIN_MIN;
++    ae_sns_dft->max_dgain_target = ae_sns_dft->max_dgain;
++    ae_sns_dft->min_dgain_target = ae_sns_dft->min_dgain;
++
++    ae_sns_dft->ae_compensation = IMX662_AE_COMPENSATION_DEFAULT;
++    ae_sns_dft->ae_exp_mode = IMX662_AE_EXP_MODE;
++    ae_sns_dft->init_exposure = cis->init_exposure ? cis->init_exposure : 4000;
++
++    ae_sns_dft->max_int_time = sns_state->fl_std - IMX662_FL_OFFSET_LINEAR;
++    ae_sns_dft->min_int_time = 1;
++    ae_sns_dft->max_int_time_target = IMX662_MAX_INT_TIME_TARGET;
++    ae_sns_dft->min_int_time_target = ae_sns_dft->min_int_time;
++    ae_sns_dft->ae_route_ex_valid = cis->ae_route_ex_valid;
++    (td_void)memcpy_s(&ae_sns_dft->ae_route_attr, sizeof(ot_isp_ae_route),
++        &cis->init_ae_route, sizeof(ot_isp_ae_route));
++    (td_void)memcpy_s(&ae_sns_dft->ae_route_attr_ex, sizeof(ot_isp_ae_route_ex),
++        &cis->init_ae_route_ex, sizeof(ot_isp_ae_route_ex));
++}
++
++static td_s32 cmos_get_ae_default(ot_vi_pipe vi_pipe, ot_isp_ae_sensor_default *ae_sns_dft)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(ae_sns_dft);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    (td_void)memset_s(&ae_sns_dft->ae_route_attr, sizeof(ot_isp_ae_route), 0, sizeof(ot_isp_ae_route));
++
++    cmos_get_ae_comm_default(cis, ae_sns_dft, sns_state);
++
++    switch (sns_state->wdr_mode) {
++        case OT_WDR_MODE_NONE:
++            cmos_get_ae_linear_default(cis, ae_sns_dft, sns_state);
++            break;
++        default:
++            cmos_get_ae_linear_default(cis, ae_sns_dft, sns_state);
++            break;
++    }
++
++    return TD_SUCCESS;
++}
++
++static td_void cmos_config_vmax(ot_isp_sns_state *sns_state, td_u32 vmax)
++{
++    sns_state->regs_info[1].i2c_data[VALUE_IDX].data = 0x00;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MSB_IDX].data = (vmax >> 16) & 0xF;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MID_IDX].data = (vmax >> 8) & 0xFF;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_LSB_IDX].data = vmax & 0xFF;
++    sns_state->regs_info[0].i2c_data[VALUE_IDX].data = 0x01;
++}
++
++static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_default *ae_sns_dft)
++{
++    td_u32 vmax;
++    td_float max_fps = IMX662_LINEAR_FRAMERATE;
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++    sns_check_pointer_void_return(ae_sns_dft);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    vmax = (td_u32)(IMX662_VMAX_DEFAULT * max_fps / fps);
++    vmax = (vmax < IMX662_VMAX_DEFAULT) ? IMX662_VMAX_DEFAULT : vmax;
++    vmax = (vmax > IMX662_FULL_LINES_MAX) ? IMX662_FULL_LINES_MAX : vmax;
++
++    cmos_config_vmax(sns_state, vmax);
++
++    sns_state->fl_std = vmax;
++    ae_sns_dft->lines_per500ms = (td_u32)(IMX662_VMAX_DEFAULT * max_fps / 2);
++
++    ae_sns_dft->fps = fps;
++    ae_sns_dft->full_lines_std = sns_state->fl_std;
++    ae_sns_dft->max_int_time = sns_state->fl_std - IMX662_FL_OFFSET_LINEAR;
++    sns_state->fl[0] = sns_state->fl_std;
++    ae_sns_dft->full_lines = sns_state->fl[0];
++    ae_sns_dft->hmax_times = (td_u32)(1000000000ULL / (sns_state->fl_std * max_fps));
++
++    return;
++}
++
++static td_void cmos_slow_framerate_set(ot_vi_pipe vi_pipe, td_u32 full_lines, ot_isp_ae_sensor_default *ae_sns_dft)
++{
++    td_u32 vmax;
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++    sns_check_pointer_void_return(ae_sns_dft);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    vmax = full_lines + IMX662_FL_OFFSET_LINEAR;
++    vmax = clip3(vmax, IMX662_VMAX_DEFAULT, IMX662_FULL_LINES_MAX);
++    sns_state->fl[0] = vmax;
++
++    ae_sns_dft->full_lines = full_lines;
++    ae_sns_dft->max_int_time = sns_state->fl[0] - IMX662_FL_OFFSET_LINEAR;
++    return;
++}
++
++static td_void cmos_inttime_update_linear(ot_isp_sns_state *sns_state, td_u32 int_time)
++{
++    td_u32 val;
++
++    val = (int_time > IMX662_FULL_LINES_MAX) ? IMX662_FULL_LINES_MAX : int_time;
++
++    sns_state->regs_info[1].i2c_data[VALUE_IDX].data = 0x00;
++    sns_state->regs_info[0].i2c_data[EXP_REG_MSB_IDX].data = (val >> 16) & 0xF;
++    sns_state->regs_info[0].i2c_data[EXP_REG_MID_IDX].data = (val >> 8) & 0xFF;
++    sns_state->regs_info[0].i2c_data[EXP_REG_LSB_IDX].data = val & 0xFF;
++    sns_state->regs_info[0].i2c_data[VALUE_IDX].data = 0x01;
++
++    return;
++}
++
++static td_void cmos_inttime_update(ot_vi_pipe vi_pipe, td_u32 int_time)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    cmos_inttime_update_linear(sns_state, int_time);
++    return;
++}
++
++static td_void cmos_again_calc_table(ot_vi_pipe vi_pipe, td_u32 *pu32_again_lin, td_u32 *pu32_again_db)
++{
++    ot_unused(vi_pipe);
++    sns_check_pointer_void_return(pu32_again_lin);
++    sns_check_pointer_void_return(pu32_again_db);
++
++    *pu32_again_lin = IMX662_AGAIN_MIN;
++    *pu32_again_db = 0;
++    return;
++}
++
++static td_void cmos_gains_update(ot_vi_pipe vi_pipe, td_u32 pu32_again, td_u32 pu32_dgain)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    sns_state->regs_info[1].i2c_data[VALUE_IDX].data = 0x00;
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].data = (td_u8)(pu32_again & 0xFF);
++    sns_state->regs_info[0].i2c_data[VALUE_IDX].data = 0x01;
++
++    return;
++}
++
++static td_s32 cmos_isp_get_default(ot_vi_pipe vi_pipe, ot_isp_cmos_default *isp_def)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(isp_def);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    memset_s(isp_def, sizeof(ot_isp_cmos_default), 0, sizeof(ot_isp_cmos_default));
++
++    /* All tuning keys left 0: ISP uses built-in defaults for CLUT/DPC/WDR/LSC/ACS
++     * and the linear pipeline (demosaic, sharpen, drc, bayer_nr, gamma, etc.).
++     * Populate per-sensor tuning tables once measured. */
++
++    isp_def->wdr_switch_attr.exp_ratio[0] = 0x40;
++
++    isp_def->sns_mode.sns_id = IMX662_ID;
++    isp_def->sns_mode.sns_mode = sns_state->img_mode;
++    isp_def->sns_mode.dng_raw_format.bits_per_sample = 10; /* 10bit output */
++    isp_def->sns_mode.dng_raw_format.white_level = 1023;
++    isp_def->sns_mode.valid_dng_raw_format = TD_FALSE;
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_isp_get_black_level(ot_vi_pipe vi_pipe, ot_isp_cmos_black_level *black_level)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++    td_s32 i, j;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(black_level);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    if (sns_state->init == TD_FALSE) {
++        return TD_FAILURE;
++    }
++
++    (td_void)memcpy_s(black_level, sizeof(ot_isp_cmos_black_level), &g_cmos_blc, sizeof(ot_isp_cmos_black_level));
++
++    /* Don't need to update black level when iso change */
++    black_level->auto_attr.update = TD_FALSE;
++
++    for (i = 0; i < OT_ISP_WDR_MAX_FRAME_NUM; i++) {
++        for (j = 0; j < OT_ISP_BAYER_CHN_NUM; j++) {
++            black_level->auto_attr.black_level[i][j] = BLACK_LEVEL_DEFAULT;
++        }
++    }
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_isp_get_blc_clamp_info(ot_vi_pipe vi_pipe, td_bool *blc_clamp_en)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(blc_clamp_en);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    *blc_clamp_en = cis->blc_clamp_info;
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_isp_set_wdr_mode(ot_vi_pipe vi_pipe, td_u8 mode)
++{
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++
++    sns_state = cmos_get_state(vi_pipe);
++    sns_check_pointer_return(sns_state);
++
++    sns_state->sync_init = TD_FALSE;
++
++    switch (mode & 0x3F) {
++        case OT_WDR_MODE_NONE:
++            sns_state->wdr_mode = OT_WDR_MODE_NONE;
++            break;
++        default:
++            isp_err_trace("Not support this WDR mode!\n");
++            return TD_FAILURE;
++    }
++
++    (td_void)memset_s(sns_state->wdr_int_time, sizeof(sns_state->wdr_int_time),
++        0, sizeof(sns_state->wdr_int_time));
++
++    return TD_SUCCESS;
++}
++
++static td_void cmos_comm_sns_reg_info_init(cis_info *cis, ot_isp_sns_state *sns_state)
++{
++    td_u32 i;
++
++    sns_state->regs_info[0].sns_type = OT_ISP_SNS_TYPE_I2C;
++    sns_state->regs_info[0].com_bus.i2c_dev = cis->bus_info.i2c_dev;
++    sns_state->regs_info[0].cfg2_valid_delay_max = 2;
++    sns_state->regs_info[0].reg_num = REG_MAX_IDX;
++
++    for (i = 0; i < sns_state->regs_info[0].reg_num; i++) {
++        sns_state->regs_info[0].i2c_data[i].update = TD_TRUE;
++        sns_state->regs_info[0].i2c_data[i].dev_addr = IMX662_I2C_ADDR;
++        sns_state->regs_info[0].i2c_data[i].addr_byte_num = IMX662_ADDR_BYTE;
++        sns_state->regs_info[0].i2c_data[i].data_byte_num = IMX662_DATA_BYTE;
++    }
++
++    /* Page select */
++    sns_state->regs_info[0].i2c_data[PAGE_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[PAGE_IDX].reg_addr = 0x3000;
++
++    /* EXP_H */
++    sns_state->regs_info[0].i2c_data[EXP_REG_MSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[EXP_REG_MSB_IDX].reg_addr = 0x3052;
++
++    /* EXP_MID */
++    sns_state->regs_info[0].i2c_data[EXP_REG_MID_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[EXP_REG_MID_IDX].reg_addr = 0x3051;
++
++    /* EXP_LSB */
++    sns_state->regs_info[0].i2c_data[EXP_REG_LSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[EXP_REG_LSB_IDX].reg_addr = 0x3050;
++
++    /* VMAX H */
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MSB_IDX].reg_addr = 0x302A;
++
++    /* VMAX M */
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MID_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_MID_IDX].reg_addr = 0x3029;
++
++    /* VMAX L */
++    sns_state->regs_info[0].i2c_data[VMAX_REG_LSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[VMAX_REG_LSB_IDX].reg_addr = 0x3028;
++
++    /* AGAIN L */
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].reg_addr = 0x0900;
++
++    /* AGAIN M */
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].reg_addr = 0x0901;
++
++    /* DGAIN L */
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].reg_addr = 0x0910;
++
++    /* DGAIN H */
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].reg_addr = 0x0911;
++
++    /* Group hold */
++    sns_state->regs_info[0].i2c_data[VALUE_IDX].delay_frame_num = 0;
++    sns_state->regs_info[0].i2c_data[VALUE_IDX].reg_addr = 0x3001;
++
++    return;
++}
++
++static td_void cmos_sns_reg_info_update(ot_vi_pipe vi_pipe, ot_isp_sns_state *sns_state)
++{
++    td_u32 i;
++    ot_unused(vi_pipe);
++
++    for (i = 0; i < sns_state->regs_info[0].reg_num; i++) {
++        if (sns_state->regs_info[0].i2c_data[i].data == sns_state->regs_info[1].i2c_data[i].data) {
++            sns_state->regs_info[0].i2c_data[i].update = TD_FALSE;
++        } else {
++            sns_state->regs_info[0].i2c_data[i].update = TD_TRUE;
++        }
++    }
++
++    return;
++}
++
++static td_s32 cmos_isp_get_sns_regs_info(ot_vi_pipe vi_pipe, ot_isp_sns_regs_info *sns_regs_info)
++{
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(sns_regs_info);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    if ((sns_state->sync_init == TD_FALSE) || (sns_regs_info->config == TD_FALSE)) {
++        cmos_comm_sns_reg_info_init(cis, sns_state);
++        sns_state->sync_init = TD_TRUE;
++    } else {
++        cmos_sns_reg_info_update(vi_pipe, sns_state);
++    }
++
++    sns_regs_info->config = TD_FALSE;
++    (td_void)memcpy_s(sns_regs_info, sizeof(ot_isp_sns_regs_info),
++        &sns_state->regs_info[0], sizeof(ot_isp_sns_regs_info));
++    (td_void)memcpy_s(&sns_state->regs_info[1], sizeof(ot_isp_sns_regs_info),
++        &sns_state->regs_info[0], sizeof(ot_isp_sns_regs_info));
++    sns_state->fl[1] = sns_state->fl[0];
++
++    return TD_SUCCESS;
++}
++
++static td_void cmos_isp_config_image_mode_param(ot_vi_pipe vi_pipe, td_u8 sns_image_mode,
++    ot_isp_sns_state *sns_state)
++{
++    ot_unused(vi_pipe);
++
++    switch (sns_image_mode) {
++        case 0:
++        case 1:
++        case 2:
++        default:
++            sns_state->fl_std = IMX662_VMAX_DEFAULT;
++            break;
++    }
++
++    return;
++}
++
++static td_s32 cmos_isp_set_image_mode(ot_vi_pipe vi_pipe, const ot_isp_cmos_sns_image_mode *sns_image_mode)
++{
++    td_u32 i;
++    td_u8 image_mode;
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(sns_image_mode);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_return(sns_state);
++
++    image_mode = sns_state->img_mode;
++
++    for (i = 0; i < IMX662_MODE_MAX; i++) {
++        if (sns_image_mode->fps <= cis->mode_tbl[i].max_fps &&
++            sns_image_mode->width <= cis->mode_tbl[i].width &&
++            sns_image_mode->height <= cis->mode_tbl[i].height &&
++            sns_state->wdr_mode == cis->mode_tbl[i].wdr_mode) {
++            image_mode = (imx662_res_mode)i;
++            break;
++        }
++    }
++
++    if (i >= IMX662_MODE_MAX) {
++        cmos_err_mode_print(sns_image_mode, sns_state);
++        return TD_FAILURE;
++    }
++
++    cmos_isp_config_image_mode_param(vi_pipe, image_mode, sns_state);
++
++    if ((sns_state->init == TD_TRUE) && (image_mode == sns_state->img_mode)) {
++        return OT_ISP_DO_NOT_NEED_SWITCH_IMAGEMODE;
++    }
++
++    sns_state->sync_init = TD_FALSE;
++    sns_state->img_mode = image_mode;
++    sns_state->fl[0] = sns_state->fl_std;
++    sns_state->fl[1] = sns_state->fl[0];
++
++    return TD_SUCCESS;
++}
++
++static td_void cmos_isp_mirror_flip(ot_vi_pipe vi_pipe, ot_isp_sns_mirrorflip_type sns_mirror_flip)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    (td_void)cis_write_reg(&cis->i2c, IMX662_REG_MIRROR_FLIP, (td_u16)sns_mirror_flip);
++}
++
++static td_void cmos_isp_set_pixel_detect(ot_vi_pipe vi_pipe, td_bool enable)
++{
++    ot_unused(vi_pipe);
++    ot_unused(enable);
++}
++
++static td_void cmos_isp_init(ot_vi_pipe vi_pipe)
++{
++    td_s32 ret;
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sensor_state = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sensor_state = cis->sns_state;
++    sns_check_pointer_void_return(sensor_state);
++
++    cis->i2c.addr = IMX662_I2C_ADDR;
++    cis->i2c.addr_byte_num = IMX662_ADDR_BYTE;
++    cis->i2c.data_byte_num = IMX662_DATA_BYTE;
++
++    ret = cis_i2c_init(cis);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("i2c init failed!\n");
++        return;
++    }
++
++    /* Write global init sequence (standby entry, PLL, MIPI config) */
++    ret = imx662_reg_init(cis, g_imx662_init_seq, IMX662_INIT_SEQ_LEN);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662 global init failed!\n");
++        return;
++    }
++
++    /* Configure mode-specific registers */
++    ret = imx662_linear_init(cis, IMX662_VMAX_DEFAULT, IMX662_HMAX_1080P_30FPS,
++        IMX662_LANEMODE_1LANE, IMX662_DATARATE_720,
++        IMX662_ADBIT_12BIT, IMX662_MDBIT_12BIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662 mode init failed!\n");
++        return;
++    }
++
++    sensor_state->init = TD_TRUE;
++
++    return;
++}
++
++static td_void cmos_isp_exit(ot_vi_pipe vi_pipe)
++{
++    td_s32 ret;
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    ret = cis_i2c_exit(cis);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662 exit failed!\n");
++    }
++
++    return;
++}
++
++static td_void cmos_isp_global_init(ot_vi_pipe vi_pipe)
++{
++    ot_isp_sns_state *sns_state = TD_NULL;
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    sns_state->init = TD_FALSE;
++    sns_state->sync_init = TD_FALSE;
++    sns_state->img_mode = 0;
++    sns_state->wdr_mode = OT_WDR_MODE_NONE;
++    sns_state->fl_std = IMX662_VMAX_DEFAULT;
++    sns_state->fl[0] = IMX662_VMAX_DEFAULT;
++    sns_state->fl[1] = IMX662_VMAX_DEFAULT;
++
++    (td_void)memset_s(&sns_state->regs_info[0], sizeof(ot_isp_sns_regs_info), 0, sizeof(ot_isp_sns_regs_info));
++    (td_void)memset_s(&sns_state->regs_info[1], sizeof(ot_isp_sns_regs_info), 0, sizeof(ot_isp_sns_regs_info));
++
++    return;
++}
++
++static td_s32 cmos_register_callback(ot_vi_pipe vi_pipe, ot_isp_3a_alg_lib *ae_lib, ot_isp_3a_alg_lib *awb_lib)
++{
++    td_s32 ret;
++    cis_register reg = {0};
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(ae_lib);
++    sns_check_pointer_return(awb_lib);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    cis->pipe = vi_pipe;
++
++    reg.ae_lib = ae_lib;
++    reg.awb_lib = awb_lib;
++
++    cmos_init_sensor_exp_function(&reg.isp_register.sns_exp);
++    cmos_init_ae_exp_function(&reg.ae_register.sns_exp);
++    cmos_init_awb_exp_function(&reg.awb_register.sns_exp);
++
++    ret = cis_register_callback(cis, &reg);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("cis_register_callback failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_unregister_callback(ot_vi_pipe vi_pipe, ot_isp_3a_alg_lib *ae_lib, ot_isp_3a_alg_lib *awb_lib)
++{
++    td_s32 ret;
++    cis_register reg = {0};
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(ae_lib);
++    sns_check_pointer_return(awb_lib);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    reg.ae_lib = ae_lib;
++    reg.awb_lib = awb_lib;
++    ret = cis_unregister_callback(cis, &reg);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("cis_unregister_callback failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
++
++static void cmos_standby(ot_vi_pipe vi_pipe)
++{
++    td_s32 ret = TD_SUCCESS;
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    ret = imx662_standby_mode(cis);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write register failed!\n");
++    }
++    return;
++}
++
++static void cmos_restart(ot_vi_pipe vi_pipe)
++{
++    td_s32 ret = TD_SUCCESS;
++    cis_info *cis = TD_NULL;
++    ot_isp_sns_state *sns_state = TD_NULL;
++    td_u32 vmax, hmax;
++    td_u8 lane_mode = IMX662_LANEMODE_1LANE;
++    td_u8 datarate = IMX662_DATARATE_720;
++
++    sns_check_pipe_void_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_void_return(cis);
++
++    sns_state = cis->sns_state;
++    sns_check_pointer_void_return(sns_state);
++
++    vmax = sns_state->fl_std;
++    hmax = IMX662_HMAX_1080P_30FPS;
++
++    ret = imx662_restart_mode(cis, vmax, hmax, lane_mode, datarate);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write register failed!\n");
++    }
++    return;
++}
++
++static td_s32 cmos_write_register(ot_vi_pipe vi_pipe, td_u32 addr, td_u32 data)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    sns_check_return(cis_write_reg(&cis->i2c, addr, data));
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_read_register(ot_vi_pipe vi_pipe, td_u32 addr)
++{
++    ot_unused(vi_pipe);
++    ot_unused(addr);
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_set_bus_info(ot_vi_pipe vi_pipe, ot_isp_sns_commbus sns_bus_info)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    cis->bus_info.i2c_dev = sns_bus_info.i2c_dev;
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_set_init(ot_vi_pipe vi_pipe, ot_isp_init_attr *init_attr)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(init_attr);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    cis_init_attr(cis, init_attr);
++
++    return TD_SUCCESS;
++}
++
++static td_s32 cmos_set_fast_ae(ot_vi_pipe vi_pipe, ot_isp_sns_fast_ae_attr *fast_ae_attr)
++{
++    cis_info *cis = TD_NULL;
++
++    sns_check_pipe_return(vi_pipe);
++    sns_check_pointer_return(fast_ae_attr);
++
++    cis = cmos_get_info(vi_pipe);
++    sns_check_pointer_return(cis);
++
++    cis->fast_ae_en = fast_ae_attr->enable;
++    return TD_SUCCESS;
++}
++
++static td_void cmos_init_sensor_exp_function(ot_isp_sns_exp_func *sensor_exp_func)
++{
++    (td_void)memset_s(sensor_exp_func, sizeof(ot_isp_sns_exp_func), 0, sizeof(ot_isp_sns_exp_func));
++
++    sensor_exp_func->pfn_cmos_sns_init              = cmos_isp_init;
++    sensor_exp_func->pfn_cmos_sns_exit              = cmos_isp_exit;
++    sensor_exp_func->pfn_cmos_sns_global_init       = cmos_isp_global_init;
++    sensor_exp_func->pfn_cmos_set_image_mode        = cmos_isp_set_image_mode;
++    sensor_exp_func->pfn_cmos_set_wdr_mode          = cmos_isp_set_wdr_mode;
++    sensor_exp_func->pfn_cmos_get_isp_default       = cmos_isp_get_default;
++    sensor_exp_func->pfn_cmos_get_isp_black_level   = cmos_isp_get_black_level;
++    sensor_exp_func->pfn_cmos_get_blc_clamp_info    = cmos_isp_get_blc_clamp_info;
++    sensor_exp_func->pfn_cmos_set_pixel_detect      = cmos_isp_set_pixel_detect;
++    sensor_exp_func->pfn_cmos_get_sns_reg_info      = cmos_isp_get_sns_regs_info;
++}
++
++ot_isp_sns_obj g_sns_imx662_obj = {
++    .pfn_register_callback     = cmos_register_callback,
++    .pfn_un_register_callback  = cmos_unregister_callback,
++    .pfn_standby               = cmos_standby,
++    .pfn_restart               = cmos_restart,
++    .pfn_mirror_flip           = cmos_isp_mirror_flip,
++    .pfn_set_blc_clamp         = TD_NULL,
++    .pfn_write_reg             = cmos_write_register,
++    .pfn_read_reg              = cmos_read_register,
++    .pfn_set_bus_info          = cmos_set_bus_info,
++    .pfn_set_init              = cmos_set_init,
++    .pfn_set_fast_ae           = cmos_set_fast_ae
++};
++
++ot_isp_sns_obj *imx662_get_obj(td_void)
++{
++    return &g_sns_imx662_obj;
++}

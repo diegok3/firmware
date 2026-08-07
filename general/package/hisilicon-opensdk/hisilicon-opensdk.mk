@@ -233,7 +233,8 @@ HISILICON_OPENSDK_SENSORS_hi3516cv6xx = \
 	smart_sc431hai/libsns_sc431hai \
 	smart_sc4336p/libsns_sc4336p \
 	smart_sc450ai/libsns_sc450ai \
-	smart_sc500ai/libsns_sc500ai
+	smart_sc500ai/libsns_sc500ai \
+	sony_imx662/libsns_imx662
 HISILICON_OPENSDK_SENSORS_hi3519dv500 = \
 	gst_412c/libsns_gst412c \
 	omnivision_os04a10/libsns_os04a10 \

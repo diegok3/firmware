@@ -1,0 +1,21 @@
+diff --git a/kernel/init/hi3516cv6xx/pm_init.c b/kernel/init/hi3516cv6xx/pm_init.c
+--- a/kernel/init/hi3516cv6xx/pm_init.c
++++ b/kernel/init/hi3516cv6xx/pm_init.c
+@@ -6,6 +6,8 @@
+ 
+ #ifndef MODULE
+ static unsigned int g_pm_quick_start_flag = 1;
++#else
++extern void pm_set_quick_start_flag(unsigned int quick_start_flag);
+ #endif
+ 
+ #ifdef OT_PM_DEBUG
+@@ -31,6 +33,8 @@
+ #endif
+ #ifndef MODULE
+     pm_set_quick_start_flag(g_pm_quick_start_flag);
++#else
++    pm_set_quick_start_flag(1);
+ #endif
+     return pm_module_init();
+ }
