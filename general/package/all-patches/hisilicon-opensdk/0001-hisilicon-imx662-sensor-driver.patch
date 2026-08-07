@@ -65,11 +65,19 @@ new file mode 100644
 +    {0x3000, 0x01},    /* enter standby */
 +    {0x3001, 0x00},    /* REGHOLD release */
 +    {0x3002, 0x01},    /* XMSTA start */
++    {0x301A, 0x00},    /* WDMODE = Normal */
++    {0x301B, 0x00},    /* ADDMODE = non-binning */
++    {0x301E, 0x01},    /* VCMODE = virtual channel 1 */
 +    {0x30A4, 0x02},    /* XVSOUTSEL */
-+    {0x30DC, 0x32},    /* BLKLEVEL */
++    {0x30A6, 0x0F},    /* XVS/XHS DRIVE HiZ */
++    {0x30DC, 0x32},    /* BLKLEVEL low byte */
++    {0x30DD, 0x40},    /* BLKLEVEL high byte → full = 0x432 */
++    {0x3400, 0x01},    /* GAIN_PGC_FIDMD */
 +    {0x3444, 0xAC},    /* PLL_ctrl1 */
 +    {0x3445, 0x09},    /* PLL_ctrl2 */
 +    {0x3446, 0x01},    /* PLL_ctrl3 */
++    {0x3460, 0x21},    /* Normal mode (22h=C HDR mode) */
++    {0x3492, 0x08},    /* RESERVED */
 +    {0x349E, 0x05},    /* MIPI_TX_CTRL1 */
 +    {0x349F, 0x19},    /* MIPI_TX_CTRL2 */
 +    {0x34A0, 0x00},    /* MIPI_TX_CTRL3 */
@@ -81,6 +89,7 @@ new file mode 100644
 +    {0x34AA, 0x82},    /* MIPI_PHY_Tx5 */
 +    {0x34AC, 0x78},    /* MIPI_PHY_Tx6 */
 +    {0x34AE, 0x6E},    /* MIPI_PHY_Tx7 */
++    {0x3C40, 0x06},    /* Normal mode, CHDR=05h */
 +    {0x3014, 0x03},    /* INCK_SEL = 3 (27MHz, board MCLK) */
 +};
 +
@@ -134,6 +143,7 @@ new file mode 100644
 +#define IMX662_ADBIT_12BIT      0x01
 +#define IMX662_MDBIT_10BIT      0x00
 +#define IMX662_MDBIT_12BIT      0x01
++#define IMX662_DATARATE_1782    0x02
 +#define IMX662_DATARATE_720     0x06
 +#define IMX662_LANEMODE_1LANE   0x00
 +#define IMX662_LANEMODE_4LANE   0x03
@@ -543,13 +553,13 @@ new file mode 100644
 +        return ret;
 +    }
 +
-+    /* HMAX */
-+    ret = cis_write_reg(&cis->i2c, 0x302C, (hmax >> 8) & 0xFF);
++    /* HMAX — LSB first per datasheet: 0x302C=HMAX[7:0], 0x302D=HMAX[15:8] */
++    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
 +    if (ret != TD_SUCCESS) {
 +        isp_err_trace("write 0x302C failed!\n");
 +        return ret;
 +    }
-+    ret = cis_write_reg(&cis->i2c, 0x302D, hmax & 0xFF);
++    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
 +    if (ret != TD_SUCCESS) {
 +        isp_err_trace("write 0x302D failed!\n");
 +        return ret;
@@ -576,6 +586,23 @@ new file mode 100644
 +    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
 +    if (ret != TD_SUCCESS) {
 +        isp_err_trace("write 0x3000 exit standby failed!\n");
++        return ret;
++    }
++
++    /* 12-bit output mode config (must be written after standby exit) */
++    ret = cis_write_reg(&cis->i2c, 0x3A50, 0x62);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A50 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3A51, 0x01);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A51 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3A52, 0x19);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A52 failed!\n");
 +        return ret;
 +    }
 +
@@ -624,14 +651,15 @@ new file mode 100644
 +        return ret;
 +    }
 +
-+    ret = cis_write_reg(&cis->i2c, 0x302C, (hmax >> 8) & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write HMAX high failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x302D, hmax & 0xFF);
++    /* HMAX — LSB first per datasheet */
++    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
 +    if (ret != TD_SUCCESS) {
 +        isp_err_trace("write HMAX low failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write HMAX high failed!\n");
 +        return ret;
 +    }
 +
@@ -1469,7 +1497,7 @@ new file mode 100644
 +
 +    /* Configure mode-specific registers */
 +    ret = imx662_linear_init(cis, IMX662_VMAX_DEFAULT, IMX662_HMAX_1080P_30FPS,
-+        IMX662_LANEMODE_1LANE, IMX662_DATARATE_720,
++        IMX662_LANEMODE_1LANE, IMX662_DATARATE_1782,
 +        IMX662_ADBIT_12BIT, IMX662_MDBIT_12BIT);
 +    if (ret != TD_SUCCESS) {
 +        isp_err_trace("imx662 mode init failed!\n");
@@ -1605,7 +1633,7 @@ new file mode 100644
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +    td_u32 vmax, hmax;
 +    td_u8 lane_mode = IMX662_LANEMODE_1LANE;
-+    td_u8 datarate = IMX662_DATARATE_720;
++    td_u8 datarate = IMX662_DATARATE_1782;
 +
 +    sns_check_pipe_void_return(vi_pipe);
 +
