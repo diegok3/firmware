@@ -1,4 +1,20 @@
-buildroot-*/
+# Binarios compilados y artefactos de build
+utils/astro_streamer
+utils/vi_raw_capture
+utils/i2c_direct
+utils/i2c_dump
+utils/i2c_mclk
+utils/i2c_read
+utils/i2c_read_arm
+utils/i2c_recovery
+utils/i2c_test
+utils/fix_pixel_rate.so
+*.o
+*.so
+
+# Árbol de build (5.8GB, no se sube)
 output/
-buildroot-*
-.DS_Store
+
+# Python
+__pycache__/
+*.pyc

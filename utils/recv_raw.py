@@ -58,19 +58,25 @@ def send_cmd(sock, cmd):
     return resp.decode().strip()
 
 
-def unpack_raw12(buf):
+def unpack_raw12(buf, w, h):
+    """Decode packed raw12 (3 bytes / 2 px) to uint16 0..4095.
+
+    LSB-first packing (verified 2026-08-10): byte structure shows b0 low
+    nibble always 0 and b1 < 16, i.e. 8-bit data left-shifted <<4 inside a
+    12-bit LSB-first container.  Previous MSB-first decode was wrong.
+    """
     raw = np.frombuffer(buf, dtype=np.uint8)
     n_pixels = (len(raw) // 3) * 2
     triplets = raw[:n_pixels * 3 // 2].reshape(-1, 3)
-    hi = triplets[:, 0].astype(np.uint16)
-    mid_lo = triplets[:, 1].astype(np.uint16)
-    lo = triplets[:, 2].astype(np.uint16)
-    p0 = (hi << 4) | (mid_lo >> 4)
-    p1 = ((mid_lo & 0x0F) << 8) | lo
+    b0 = triplets[:, 0].astype(np.uint16)
+    b1 = triplets[:, 1].astype(np.uint16)
+    b2 = triplets[:, 2].astype(np.uint16)
+    p0 = b0 | ((b1 & 0x0F) << 8)   # LSB-first
+    p1 = (b1 >> 4) | (b2 << 4)      # LSB-first
     pixels = np.empty(n_pixels, dtype=np.uint16)
     pixels[0::2] = p0
     pixels[1::2] = p1
-    return pixels.reshape(HEIGHT, WIDTH)
+    return pixels.reshape(h, w)
 
 
 def to_demosaic(bayer_16):
@@ -78,9 +84,9 @@ def to_demosaic(bayer_16):
     return cv2.cvtColor(bayer_8, cv2.COLOR_BayerRG2BGR)
 
 
-def to_bayer_display(bayer_16):
+def to_bayer_display(bayer_16, w, h):
     bayer_8 = (bayer_16 >> 4).astype(np.uint8)
-    rgb = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
     rgb[0::2, 0::2, 2] = bayer_8[0::2, 0::2]
     rgb[0::2, 1::2, 1] = bayer_8[0::2, 1::2]
     rgb[1::2, 0::2, 1] = bayer_8[1::2, 0::2]
@@ -139,12 +145,12 @@ def main():
             break
 
         try:
-            bayer_16 = unpack_raw12(data)
+            bayer_16 = unpack_raw12(data, w, h)
 
             if mode == 'd':
                 img = to_demosaic(bayer_16)
             elif mode == 'b':
-                img = to_bayer_display(bayer_16)
+                img = to_bayer_display(bayer_16, w, h)
             else:
                 gray = to_gray(bayer_16)
                 img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)

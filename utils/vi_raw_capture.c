@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
 
 #include "ot_type.h"
 #include "ot_common.h"
@@ -65,16 +66,63 @@
 
 static int g_i2c_fd = -1;
 static volatile int g_running = 1;
+static int g_incksel = 0x03;
+static int g_datarate = 0x05;
+static int g_vc_num = 1;
+static int g_sweep = 0;
+static int g_scale = 1;
 static td_u32 g_exposure = 4000;
 static td_u32 g_again = 1024;
 static td_u32 g_dgain = 1024;
 static int g_save_next = 0;
 static char g_save_filename[256] = "frame.fits";
+static td_u8 g_scaled_buf[IMG_W_STRIDE * IMG_HEIGHT]; /* holds binned frame when g_scale>1 */
 
 static void sig_handler(int sig)
 {
     (void)sig;
     g_running = 0;
+}
+
+/* Bayer-preserving 2x binning: input RGGB 1920x1080 packed raw12 (3B/2px)
+ * -> output RGGB 960x540 packed raw12. 4x4 input block -> 2x2 output block,
+ * averaging each color channel separately so the Bayer layout is preserved.
+ * Frames are copied to a cached local buffer first (src is uncached VB memory). */
+static void bin_frame_2x(const td_u8 *src, td_u32 src_stride,
+                         td_u32 width, td_u32 height,
+                         td_u8 *dst, td_u32 dst_stride)
+{
+    uint16_t rows[4][1920];
+    td_u8 line[2880];
+    td_u32 ow = width / 2, oh = height / 2;
+
+    for (td_u32 orow = 0; orow < oh; orow += 2) {
+        td_u32 base = 4 * (orow / 2);
+        for (td_u32 k = 0; k < 4; k++) {
+            memcpy(line, src + (td_u64)(base + k) * src_stride, src_stride);
+            for (td_u32 i = 0; i < width / 2; i++) {
+                td_u8 b0 = line[i * 3], b1 = line[i * 3 + 1], b2 = line[i * 3 + 2];
+                rows[k][i * 2] = (td_u16)((b0 << 4) | (b1 >> 4));
+                rows[k][i * 2 + 1] = (td_u16)(((b1 & 0x0F) << 8) | b2);
+            }
+        }
+        td_u8 *o0 = dst + (td_u64)orow * dst_stride;
+        td_u8 *o1 = dst + (td_u64)(orow + 1) * dst_stride;
+        for (td_u32 j = 0; j < ow / 2; j++) {
+            td_u32 c = j * 4;
+            uint16_t R  = (rows[0][c] + rows[0][c + 2] + rows[2][c] + rows[2][c + 2]) >> 2;
+            uint16_t Ge = (rows[0][c + 1] + rows[0][c + 3] + rows[2][c + 1] + rows[2][c + 3]) >> 2;
+            uint16_t Go = (rows[1][c] + rows[1][c + 2] + rows[3][c] + rows[3][c + 2]) >> 2;
+            uint16_t B  = (rows[1][c + 1] + rows[1][c + 3] + rows[3][c + 1] + rows[3][c + 3]) >> 2;
+            td_u32 o = j * 3;
+            o0[o] = R >> 4;
+            o0[o + 1] = ((R & 0xF) << 4) | (Ge >> 8);
+            o0[o + 2] = Ge & 0xFF;
+            o1[o] = Go >> 4;
+            o1[o + 1] = ((Go & 0xF) << 4) | (B >> 8);
+            o1[o + 2] = B & 0xFF;
+        }
+    }
 }
 
 static td_s32 i2c_write_reg(td_u16 reg, td_u8 val)
@@ -126,14 +174,14 @@ static void sensor_write_gain(td_u32 again, td_u32 dgain)
 
 static const struct { td_u16 reg; td_u8 val; } imx662_init_common[] = {
     {0x3000, 0x01}, {0x3001, 0x00}, {0x3002, 0x00},
-    {0x3014, 0x01},
+    {0x3014, 0x03},
     {0x301A, 0x00}, {0x301B, 0x00}, {0x301C, 0x00},
     {0x301E, 0x01}, {0x3020, 0x00}, {0x3021, 0x00}, {0x3026, 0x04},
     {0x3030, 0x00}, {0x3031, 0x00}, {0x3032, 0x00},
-    {0x303C, 0x00}, {0x303D, 0x00},
-    {0x303E, 0x90}, {0x303F, 0x07},
-    {0x3044, 0x00}, {0x3045, 0x00},
-    {0x3046, 0x4C}, {0x3047, 0x04},
+    {0x303C, 0x08}, {0x303D, 0x00},
+    {0x303E, 0x80}, {0x303F, 0x07},
+    {0x3044, 0x08}, {0x3045, 0x00},
+    {0x3046, 0x38}, {0x3047, 0x04},
     {0x3054, 0x0E}, {0x3055, 0x00}, {0x3056, 0x00},
     {0x3058, 0x8A}, {0x3059, 0x01}, {0x305A, 0x00},
     {0x3060, 0x16}, {0x3061, 0x01}, {0x3062, 0x00},
@@ -178,15 +226,15 @@ static const struct { td_u16 reg; td_u8 val; } imx662_init_common[] = {
 };
 
 static const struct { td_u16 reg; td_u8 val; } imx662_init_mode[] = {
-    {0x3015, 0x02},
-    {0x3018, 0x00},
+    {0x3015, 0x05},
+    {0x3018, 0x04},
     {0x3040, 0x00},
-    {0x3022, 0x00},
+    {0x3022, 0x01},
     {0x3023, 0x01},
     {0x301B, 0x00},
-    {0x3A50, 0x62},
-    {0x3A51, 0x01},
-    {0x3A52, 0x19},
+    {0x3A50, 0xFF},
+    {0x3A51, 0x03},
+    {0x3A52, 0x00},
     {0x3028, 0xE2},
     {0x3029, 0x04},
     {0x302A, 0x00},
@@ -209,14 +257,13 @@ static td_s32 init_sensor_full(void)
     }
     fprintf(stderr, "%d ok %d fail\n", ok, fail);
 
-    fprintf(stderr, "  Phase 2: exit standby + PLL lock...\n");
-    i2c_write_reg(0x3000, 0x00);
-    i2c_write_reg(0x3001, 0x00);
-    usleep(100000);
-
+    /* Mode registers must be written while the sensor is still in STANDBY
+       (0x3000=0x01 from Phase 1). This matches libsns_imx662 (imx662_linear_init):
+       DATARATE/WINMODE/ADBIT/0x3A50-52/HMAX/VMAX are written BEFORE exit standby.
+       Exiting standby first would leave the MIPI TX/lane config unapplied. */
     int ok2 = 0, fail2 = 0;
     total = sizeof(imx662_init_mode) / sizeof(imx662_init_mode[0]);
-    fprintf(stderr, "  Phase 3: %u regs... ", total);
+    fprintf(stderr, "  Phase 2: %u mode regs (standby)... ", total);
     fflush(stderr);
     for (td_u32 i = 0; i < total; i++) {
         if (i2c_write_reg(imx662_init_mode[i].reg, imx662_init_mode[i].val) == 0) ok2++;
@@ -224,6 +271,22 @@ static td_s32 init_sensor_full(void)
         usleep(100);
     }
     fprintf(stderr, "%d ok %d fail\n", ok2, fail2);
+
+    /* INCK_SEL and DATARATE_SEL overrides (--incksel/--datarate) must be applied
+       while still in STANDBY, so the PLL locks with the final clock values.
+       Defaults: INCK=0x03 (27MHz MCLK from SoC) + DR=0x05 (891Mbps) = 30fps. */
+    if (g_incksel != 0x03 || g_datarate != 0x05) {
+        fprintf(stderr, "  Override: INCK_SEL=0x%02X DATARATE_SEL=0x%02X\n", g_incksel, g_datarate);
+        i2c_write_reg(0x3014, g_incksel);
+        i2c_write_reg(0x3015, g_datarate);
+        usleep(50000);
+    }
+
+    /* Exit standby + start streaming LAST (matches driver order) */
+    fprintf(stderr, "  Phase 3: exit standby + PLL lock...\n");
+    i2c_write_reg(0x3000, 0x00);
+    i2c_write_reg(0x3001, 0x00);
+    usleep(100000);
 
     /* Apply default exposure/gain */
     sensor_write_exposure(g_exposure);
@@ -386,7 +449,16 @@ int main(int argc, char *argv[])
     int port = TCP_PORT;
     ot_vb_pool pool = OT_VB_INVALID_POOL_ID;
 
-    if (argc > 1) port = atoi(argv[1]);
+    int bench = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--bench") == 0) bench = 1;
+        else if (strcmp(argv[i], "--sweep") == 0) g_sweep = 1;
+        else if (strncmp(argv[i], "--incksel=", 10) == 0) g_incksel = (int)strtol(argv[i] + 10, NULL, 0);
+        else if (strncmp(argv[i], "--datarate=", 11) == 0) g_datarate = (int)strtol(argv[i] + 11, NULL, 0);
+        else if (strncmp(argv[i], "--vc=", 5) == 0) g_vc_num = (int)strtol(argv[i] + 5, NULL, 0);
+        else if (strncmp(argv[i], "--scale=", 8) == 0) g_scale = (int)strtol(argv[i] + 8, NULL, 0);
+    }
+    if (argc > 1 && argv[1][0] != '-') port = atoi(argv[1]);
     if (port <= 0) port = TCP_PORT;
 
     fprintf(stderr, "=== VI Stream + Control (port %d) ===\n", port);
@@ -524,6 +596,13 @@ int main(int argc, char *argv[])
     ot_mpi_vi_stop_pipe(VI_PIPE_ID);
     ot_mpi_vi_create_pipe(VI_PIPE_ID, &pipe_attr);
     ot_mpi_vi_set_pipe_attr(VI_PIPE_ID, &pipe_attr);
+    {
+        td_s32 vcret = ot_mpi_vi_set_pipe_vc_number(VI_PIPE_ID, g_vc_num);
+        if (vcret != TD_SUCCESS)
+            fprintf(stderr, "  set_pipe_vc_number(%d): 0x%x\n", g_vc_num, vcret);
+        else
+            fprintf(stderr, "  vc_num set to %d\n", g_vc_num);
+    }
     ot_mpi_vi_start_pipe(VI_PIPE_ID);
 
     ot_vi_chn_attr chn_attr;
@@ -542,6 +621,91 @@ int main(int argc, char *argv[])
     ret = ot_mpi_vi_enable_chn(VI_PIPE_ID, VI_CHN_ID);
     if (ret != TD_SUCCESS) { fprintf(stderr, "  enable_chn: 0x%x\n", ret); goto cleanup; }
     fprintf(stderr, "  VI OK\n");
+
+    if (bench) {
+        fprintf(stderr, "[10] BENCH mode (no TCP): measuring frame rate...\n");
+        fflush(stderr);
+
+        struct timeval t_start, t_now;
+        gettimeofday(&t_start, NULL);
+        int frames = 0;
+        int errors = 0;
+
+        while (g_running) {
+            ot_video_frame_info frame_info;
+            memset(&frame_info, 0, sizeof(frame_info));
+            ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 3000);
+            if (ret != TD_SUCCESS) {
+                errors++;
+                if (errors > 30) break;
+                continue;
+            }
+            ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
+            frames++;
+
+            gettimeofday(&t_now, NULL);
+            double elapsed = (t_now.tv_sec - t_start.tv_sec) +
+                             (t_now.tv_usec - t_start.tv_usec) / 1e6;
+            if (elapsed >= 2.0) {
+                fprintf(stderr, "  frames=%d in %.1fs = %.2f fps (err=%d)\n",
+                        frames, elapsed, frames / elapsed, errors);
+                fflush(stderr);
+                frames = 0;
+                errors = 0;
+                gettimeofday(&t_start, NULL);
+            }
+        }
+
+        fprintf(stderr, "BENCH done.\n");
+        goto cleanup;
+    }
+
+    if (g_sweep) {
+        fprintf(stderr, "[10] SWEEP mode: relocking PLL for each INCK_SEL...\n");
+        fflush(stderr);
+
+        static const struct { int inc; int dr; } sweep_table[] = {
+            {0x01, 0x02}, {0x01, 0x05}, {0x02, 0x05}, {0x03, 0x05},
+            {0x04, 0x05}, {0x00, 0x05}, {0x05, 0x05}, {0x06, 0x05},
+            {0x07, 0x05}, {0x00, 0x02}, {0x02, 0x02}, {0x03, 0x02},
+            {0x04, 0x02}, {0x05, 0x02},
+        };
+
+        for (unsigned s = 0; s < sizeof(sweep_table)/sizeof(sweep_table[0]) && g_running; s++) {
+            int inc = sweep_table[s].inc;
+            int dr = sweep_table[s].dr;
+
+            /* Standby → change clocks → exit standby → PLL relock */
+            i2c_write_reg(0x3000, 0x01);
+            usleep(50000);
+            i2c_write_reg(0x3014, (td_u8)inc);
+            i2c_write_reg(0x3015, (td_u8)dr);
+            i2c_write_reg(0x3000, 0x00);
+            usleep(200000);
+
+            /* Measure for ~3s */
+            struct timeval t_start, t_now;
+            gettimeofday(&t_start, NULL);
+            int frames = 0, errors = 0;
+            while (g_running) {
+                ot_video_frame_info frame_info;
+                memset(&frame_info, 0, sizeof(frame_info));
+                ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 2000);
+                if (ret != TD_SUCCESS) { errors++; continue; }
+                ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
+                frames++;
+                gettimeofday(&t_now, NULL);
+                double elapsed = (t_now.tv_sec - t_start.tv_sec) +
+                                 (t_now.tv_usec - t_start.tv_usec) / 1e6;
+                if (elapsed >= 3.0) break;
+            }
+            fprintf(stderr, "SWEEP INCK=0x%02X DR=0x%02X: %d frames in ~3s = %.2f fps (err=%d)\n",
+                    inc, dr, frames, frames / 3.0, errors);
+            fflush(stderr);
+        }
+        fprintf(stderr, "SWEEP done.\n");
+        goto cleanup;
+    }
 
     fprintf(stderr, "[10] TCP server on port %d...\n", port);
     fflush(stderr);
@@ -668,24 +832,51 @@ int main(int argc, char *argv[])
                 g_save_next = 0;
             }
 
+            /* Downscale (Bayer-preserving 2x binning) to fit 100Mbps link */
+            td_u16 send_w = vf->width, send_h = height;
+            td_u16 send_stride = stride;
+            td_u32 send_size = map_size;
+            const td_u8 *send_ptr = src;
+            if (g_scale > 1) {
+                struct timespec ts0, ts1;
+                clock_gettime(CLOCK_MONOTONIC, &ts0);
+                td_u32 dw = IMG_W_STRIDE / 2;
+                bin_frame_2x(src, stride, vf->width, height, g_scaled_buf, dw);
+                clock_gettime(CLOCK_MONOTONIC, &ts1);
+                double bt = (ts1.tv_sec - ts0.tv_sec) * 1000.0 + (ts1.tv_nsec - ts0.tv_nsec) / 1e6;
+                fprintf(stderr, "  [T] bin=%3.1fms ", bt);
+                fflush(stderr);
+                send_w = vf->width / 2;
+                send_h = height / 2;
+                send_stride = dw;
+                send_size = dw * send_h;
+                send_ptr = g_scaled_buf;
+            }
+
             /* Send frame over TCP */
+            struct timespec ts0, ts1;
+            clock_gettime(CLOCK_MONOTONIC, &ts0);
             fprintf(stderr, "  [DBG] sending header...\n");
             fflush(stderr);
-            if (send_frame_header(client_fd, (td_u16)vf->width, (td_u16)height, (td_u16)stride, map_size) < 0) {
+            if (send_frame_header(client_fd, send_w, send_h, send_stride, send_size) < 0) {
                 fprintf(stderr, "  [DBG] send_header FAILED errno=%d\n", errno);
                 fflush(stderr);
                 ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
                 break;
             }
-            fprintf(stderr, "  [DBG] sending %llu bytes...\n", (unsigned long long)map_size);
+            fprintf(stderr, "  [DBG] sending %u bytes...\n", send_size);
             fflush(stderr);
-            if (send_all(client_fd, src, (size_t)map_size) < 0) {
+            if (send_all(client_fd, send_ptr, (size_t)send_size) < 0) {
                 fprintf(stderr, "  [DBG] send_all FAILED errno=%d\n", errno);
                 fflush(stderr);
                 ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
                 break;
             }
             fprintf(stderr, "  [DBG] frame sent OK\n");
+            fflush(stderr);
+            clock_gettime(CLOCK_MONOTONIC, &ts1);
+            double st = (ts1.tv_sec - ts0.tv_sec) * 1000.0 + (ts1.tv_nsec - ts0.tv_nsec) / 1e6;
+            fprintf(stderr, "  [T] send=%3.1fms\n", st);
             fflush(stderr);
 
             ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);

@@ -1,10 +1,34 @@
 # AGENTS.md - Estado del Proyecto IMX662 + Hi3516CV610 (OpenIPC)
 
+> **Este archivo es la referencia técnica de trabajo.** El proyecto usa una estructura
+> de documentación viva (2026-08-10):
+> - **`CONTEXT.md`** → estado ACTUAL (pipeline VERIFICADO, qué funciona, cómo diagnosticar)
+> - **`CHANGELOG.md`** → historial de qué cambió y qué se rompió (CRÍTICO)
+> - **`docs/decisions/`** → decisiones de arquitectura (ADRs) y por qué
+> - **`docs/architecture.md`** → pipeline, frame format, config sensor
+> - **`tests/checklist.md`** → qué probar antes de declarar que algo funciona
+> - **`golden_sets/`** → ejemplos del comportamiento correcto y bugs conocidos
+> - **`tools/prompts/`**, **`tools/skills/`** → prompts y skills reutilizables
+>
+> **Regla de sesión:** al terminar, actualizar `CONTEXT.md` + `CHANGELOG.md`.
+> Nunca declarar "funciona" sin comparar contra `golden_sets/`.
+
 ## Resumen
 
 **Sensor:** Sony IMX662, 1 lane MIPI, 1080p30 raw12, i2c-0 addr 0x34
-**SoC:** Hi3516CV610, 32MB RAM, OpenIPC
-**Estado:** Streaming raw12 por TCP funcional, majestic deshabilitado permanentemente
+**SoC:** Hi3516CV610, ~25MB usable RAM, OpenIPC
+**Estado:** ✅ 30fps CONFIRMADO (bench + sweep). INCK_SEL=0x03 (27MHz) + DATARATE_SEL=0x05 (891Mbps). **DECISIÓN (2026-08-09): abandonar majestic, usar streamer propio con ISP bypass**. **astro_streamer es EL streamer que funciona (30fps exactos, frames confirmados por TCP puerto 5999 + recv_astro.py).** vc_num=0 + common pool (no create_pool). Config sensor validada contra 8 repos GitHub.
+
+**FORMATO PAYLOAD (2026-08-10): LSB-first 12-bit, datos 8-bit desplazados <<4.**
+Análisis de estructura de bytes (triplet `[b0,b1,b2]` por 2 píxeles) probó:
+- `b0` siempre múltiplo de 16 (nibble bajo = 0), `b1` siempre <16 (nibble alto = 0), `b2` rango completo
+- ⇒ el sensor entrega datos 8-bit (`v<<4`) en contenedor 12-bit **LSB-first**
+- Decode correcto: `v0 = ((b1&0xF)<<4)|(b0>>4)`, `v1 = b2` (equivalente: 12-bit LSB >> 4)
+- `recv_astro.py:raw12_to_uint16` y `recv_raw.py:unpack_raw12` FIJADOS (antes MSB-first, WRONG)
+- ⚠️ Sin embargo la imagen NO muestra correlación espacial (ch2/cv2 < 0.4 en TODOS los decodes):
+  mean 140/255 a exposición mínima (293us, ISO 100), solo 18 valores únicos en 2MP, frame-diff=99.
+  Campo plano brillante + ruido temporal (bits bajos ruido). Escena aparentemente sobreexpuesta/
+  flat, o el sensor no entrega imagen coherente. Los PNG de prueba están en /tmp/opencode/astro/.
 
 ---
 
@@ -18,7 +42,7 @@
 | GPIO I2C0 | SDA=GPIO6_6 (IOCFG2 `0x17940098`, mux=0x1135), SCL=GPIO6_7 (IOCFG2 `0x1794009C`, mux=0x1135) |
 | RAM | 32MB total (`mem=32M` en cmdline) |
 | Flash | rootfs SquashFS 8MB + appfs 4.2MB + rootfs_data (overlay JFFS2) 512KB |
-| Red | Ethernet 100Mbps, IP 192.168.1.5 |
+| Red | Ethernet 100Mbps, IP 192.168.1.16 |
 | Conexión | SSH paramiko (root/12345), SFTP roto, upload por base64 chunked |
 
 ### Particiones flash
@@ -42,16 +66,20 @@ El sistema es MUY limitado en RAM. Consideraciones:
 
 ---
 
-## Estado del sensor (I2C readback)
+## Estado del sensor (I2C readback verificado)
 
-| Registro | Valor | Descripción |
-|----------|-------|-------------|
+Los valores fueron verificados con readback I2C TANTO desde el driver (debug prints en cmos_isp_init)
+COMO desde herramienta externa (i2c_direct) mientras majestic corre. TODOS los registros coinciden.
+
+| Registro | Valor driver | Descripción |
+|----------|-------------|-------------|
 | 0x30DC | 0x32 | Chip ID IMX662 |
-| 0x3014 | 0x01 | INCK_SEL = 37.125 MHz internal oscillator |
-| 0x3015 | 0x02 | DATARATE_SEL = 1782 Mbps/lane |
-| 0x3018 | 0x00 | WINMODE = All pixel (no binning) |
+| 0x3014 | 0x03 | INCK_SEL = 27 MHz external (Hi3516 MCLK) |
+| 0x3015 | 0x05 | DATARATE_SEL = 891 Mbps/lane (SDR) |
+| 0x3018 | 0x04 | WINMODE = HD1080 crop |
 | 0x301B | 0x00 | ADDMODE = Non-binning |
-| 0x3022 | 0x00 | ADBIT = 12-bit normal mode |
+| 0x3022 | 0x01 | ADBIT = 12-bit mode |
+| 0x3023 | 0x01 | MDBIT = 12-bit |
 | 0x302C | 0xBC | HMAX low byte |
 | 0x302D | 0x07 | HMAX high byte → HMAX = 1980 |
 | 0x3028 | 0xE2 | VMAX low byte |
@@ -59,9 +87,69 @@ El sistema es MUY limitado en RAM. Consideraciones:
 | 0x302A | 0x00 | VMAX high nibble → VMAX = 1250 |
 | 0x3040 | 0x00 | LANEMODE = 1 lane |
 | 0x3444 | 0xAC | PLL config |
-| 0x3A50 | 0x62 | Normal 12-bit output |
-| 0x3A51 | 0x01 | Normal 12-bit output |
-| 0x3A52 | 0x19 | Normal 12-bit output |
+| 0x3A50 | 0xFF | 12-bit normal output |
+| 0x3A51 | 0x03 | 12-bit normal output |
+| 0x3A52 | 0x00 | 12-bit normal output |
+| 0x3000 | 0x00 | Streaming (exit standby) |
+
+**Power-on defaults** (leídos después de reset del sensor, antes de driver init):
+0x3014=0x00, 0x3015=0x02, 0x3018=0x00, 0x3040=0x03 (4-lane!), 0x302C/2D=990, 0x3444=0xFF
+
+**NOTA sobre previos reads con defaults:** Las sesiones anteriores mostraban power-on defaults
+porque la herramienta i2c_mclk hacía reset del sensor al habilitar MCLK. Con el driver
+correcto, TODOS los registros se escriben correctamente y persisten mientras el ISP corre.
+
+### IMPORTANTE: tabla INCK_SEL/DATARATE_SEL verificada por sweep (2026-08-08)
+
+El sweep relockea el PLL del sensor y mide fps reales en runtime. Resultado:
+
+| INCK_SEL (0x3014) | DATARATE_SEL (0x3015) | FPS real |
+|--------------------|----------------------|----------|
+| 0x01 (37.125MHz)   | 0x02 (1782Mbps)      | 22.3 |
+| 0x01 (37.125MHz)   | 0x05 (891Mbps)       | 22.3 |
+| 0x02               | 0x05                 | 11.7 |
+| **0x03 (27MHz)**   | **0x05 (891Mbps)**   | **30.7 ✓** |
+| 0x04 (24MHz)       | 0x05                 | 34.7 |
+| 0x00 (74.25MHz)    | 0x05                 | 9.7 |
+
+**LA COMBINACIÓN CORRECTA es INCK_SEL=0x03 + DATARATE_SEL=0x05 = 30fps exacto.**
+
+El MCLK del SoC es 27MHz (NO 37.125MHz). Con INCK_SEL=0x01 (37.125) el PLL escala
+0.727x → pixel clock 54MHz → 21.8fps. La relación 54/74.25 = 8/11 = 27/37.125.
+
+**Síntoma clásico documentado en `pauliustumas/imx662` (GitHub):** frame rate bajo
+(~5fps), frames parciales e inestables por INCK_SEL incorrecto respecto al clock real.
+
+**vi_raw_capture.c:** la tabla `imx662_init_common`/`imx662_init_mode` usa INCK=0x01/
+DR=0x02 (¡WRONG, 22fps!). Ahora hay override con defaults INCK=0x03/DR=0x05 y flags
+`--incksel=N`/`--datarate=N`/`--sweep` para testear. La tabla del driver `libsns_imx662.so`
+(majestic) YA usa INCK=0x03/DR=0x05 correcto.
+
+### IMPORTANTE: vc_num — CONTRADICCIÓN RESUELTA (2026-08-09)
+
+**El 2026-08-08 se creyó que vc_num=1 era requerido (IMX662 "envía por VC1").**
+**El 2026-08-09 se probó que astro_streamer entrega 30fps EXACTOS con vc_num=0.**
+El factor determinante NO es el vc_num sino el **tipo de pool VB**:
+
+- `vi_raw_capture.c` (default `g_vc_num=1`, `create_pool()` usuario con 4 bloques) →
+  falla `get_chn_frame 0xa0108016` (aunque antes del rebuild daba 30fps con vc_num=1)
+- `astro_streamer.c` (default `g_vc_num=0`, **common pool** vía `get_common_pool_id()` con
+  6 bloques, sin `create_pool()`) → **30.0fps estables, send_cnt/vb_fail OK**
+- Logs astro_streamer: `vb_exit: 0xa001800d`, `set_cfg: 0xa0018022` (ignorados),
+  `get_common_pool_id: 0x0 cnt=1 id[0]=0`, `init_mod_common_pool(VI): 0xa0018018` (OK)
+- `vi_raw_capture --vc=0` NO probado — la hipótesis es que `create_pool()` (pool usuario)
+  es lo que rompe la entrega, no el vc_num. Test pendiente.
+
+**SECUENCIA QUE FUNCIONA (astro_streamer):**
+1. `ot_mpi_vb_exit()` (ret puede fallar, ignorar)
+2. `vb_set_cfg(max_pool_cnt=1, common_pool[0]: blk=6)` + `vb_init()`
+3. `ot_mpi_vb_get_common_pool_id()` → usar el common pool existente (id[0])
+4. `ot_mpi_vb_init_mod_common_pool(OT_VB_UID_VI)`
+5. `pipe_attr.vc_num = 0` (NO 1)
+6. TCP server en **puerto 5999** + header de 48 bytes ("AS") + `recv_astro.py`
+
+**Sesión que funcionó (2026-08-09):** `astro_streamer 5999` → 30fps bench exacto,
+frames 1920x1080 raw12 confirmados por TCP (3.6fps reales = límite 100Mbps, no del sensor).
 
 ---
 
@@ -77,12 +165,78 @@ IMX662 → MIPI (1 lane, raw12) → MIPI RX (/dev/ot_mipi_rx)
 
 ---
 
-## Majestic deshabilitado
+## Majestic - Estado actual
 
-- `/etc/init.d/S95majestic` eliminado con `rm -f`
-- `output/build/.../S95majestic` eliminado del build tree
-- Al hacer reboot, majestic NO arranca automáticamente
-- El sensor queda streaming (init I2C + standby exit se hace una vez en boot por `S70vendor`)
+### Qué funciona
+- El .so carga correctamente (sin dlopen errors)
+- El sensor escribe TODOS los registros correctamente (verificado con I2C readback)
+- El ISP 3A callbacks se ejecutan (cmos_inttime_update, cmos_gains_update, etc.)
+- Majestic queda vivo y responde (no hace crash)
+
+### Qué NO funciona
+- **VENC timeout** — el encoder H264 no recibe frames (106+ timeouts)
+- **Exposure stuck** en 125ms (8fps) — el ISP nunca converge
+- **`cmos_slow_framerate_set`** se llama repetidamente — ISP detecta frame rate incorrecto
+- **OOM kill** — 25MB RAM total, VB pool consume ~12MB, majestic + kernel ≈ 14MB
+
+### Análisis de VENC timeout — REVISADO (2026-08-08)
+El VI dev attr muestra `pixel_rate=68416666` pero el correcto es `74250000` (891Mbps/12bit).
+Majestic calcula `lane_rate=821` Mbps, pero el sensor produce 891 Mbps (DATARATE_SEL=0x05).
+
+**CONCLUSIÓN EXPERIMENTAL: el pixel_rate NO es la causa raíz del VENC timeout.**
+Se forzó `pixel_rate=74250000` con LD_PRELOAD (ver `fix_pixel_rate.c`/`fix_pixel_rate.so`)
+y el VENC timeout PERSISTIÓ. El ISP 3A funciona pero:
+- **Exposure stuck en 125ms (8fps)** — ISP mide frame rate ~8fps, no 30fps
+- **`cmos_slow_framerate_set` llamado repetidamente** — ISP detecta que el sensor entrega frames muy lentos
+- **VB pool de majestic consume demasiada RAM** → OOM mata majestic + dropbear + syslogd
+
+### Diagnóstico real
+- `cmos_slow_framerate_set` + exposure 125ms ⇒ el ISP ve el sensor a ~8fps, NO 30fps
+- La config MIPI del sensor parece OK (vi_raw_capture funciona y entrega frames 1920x1080)
+- El problema es que **majestic (VI_ONLINE_VPSS_ONLINE, ISP procesando) NO recibe frames a 30fps**
+- Pista clave en dmesg: `mipirx not set lane mode` (2x en boot) — el MIPI RX no se configuró
+- vi_raw_capture usa `isp_bypass=TD_TRUE` y funciona; majestic usa ISP online mode y no
+
+### LD_PRELOAD fix_pixel_rate (probado OK)
+- `fix_pixel_rate.so` intercepta `ss_mpi_vi_set_pipe_online_clock` (único símbolo importado por majestic)
+- Fuerza pixel_rate 68416666 → 74250000 en runtime
+- **PERO no resuelve el VENC timeout** (confirmado experimentalmente)
+- Requiere boot limpio (kill de majestic corrompe ISP → ERR_ISP_NOT_SUPPORT)
+- Majestic corre manualmente: `LD_PRELOAD=/root/fix_pixel_rate.so majestic` (NO hay S95majestic en /etc/init.d/)
+
+### Divinus — INCOMPATIBLE confirmado en el device
+- `/usr/bin/divinus` existe pero imprime: `[hal] Unsupported chip family! Quitting...`
+- Solo soporta: Hi3516AV200, Hi3516AV300, Hi3516DV300, Hi3516CV500, Hi3519V101, Hi3556V100, Hi3559V100
+- Usa `HI_MPI_*` (SDK comercial), NO `ss_mpi_*`/`ot_mpi_*` como nuestro kernel
+- Divinus usa config binario (`.bin`), no `.ini`
+- **Descartado definitivamente** — no compatible con Hi3516CV610
+
+### Majestic — closed source
+- Binario de S3: `https://openipc.s3-eu-west-1.amazonaws.com/majestic.<family>.<variant>.master.tar.bz2`
+- Licencia PROPIETARIA (Prosperity Public License 3.0.0) — NO hay fuente C
+- `MAJESTIC_SITE`/`MAJESTIC_SOURCE` en `general/package/majestic/majestic.mk`
+- La fuente solo existe en GitHub para integration (smolrtsp) — no hay src del core
+
+### INI parameters PROBADOS (no funcionan)
+- `data_rate=1` en `[mipi]` → **ignorado** (majestic sigue mostrando `data_rate=0`)
+- `FullLinesStd=1250` en `[vi_dev]` → **no cambia** pixel_rate (sigue 68416666)
+- `pixel_rate`, `lane_rate` → **no son campos soportados** del INI
+- `lane_rate=821` viene del cálculo interno de majestic (821×1000000/12 = 68416666)
+
+### OOM
+- MemTotal: 25748 kB (~25MB usable)
+- VB pool: 3110400 × 4 buffers = ~12.4 MB
+- Kernel + 36 modules: ~10-12 MB
+- Majestic RSS: ~1.6 MB
+- Resultado: OOM killer mata majestic Y dropbear Y syslogd
+
+### Soluciones potenciales (actualizado)
+1. ~~Agregar pixel_rate al INI~~ → NO es campo soportado
+2. ~~LD_PRELOAD fix_pixel_rate~~ → probado, NO resuelve VENC timeout
+3. **Reducir VB pool** (de 3+1 a 2+1 buffers) — requiere modificar majestic binary o config
+4. **Investigar por qué majestic no recibe frames a 30fps** — el ISP detecta 8fps
+5. **Escribir streamer propio con ss_mpi_*** — bypass majestic, control total (ISP bypass funciona via vi_raw_capture)
+6. Investigar `mipirx not set lane mode` — MIPI RX no configurado correctamente por majestic
 
 ---
 
@@ -96,10 +250,16 @@ IMX662 → MIPI (1 lane, raw12) → MIPI RX (/dev/ot_mipi_rx)
 `general/package/hisilicon-osdrv-hi3516cv6xx/files/script/load_hisilicon`:
 - `SNS_TYPE0=imx662;` (antes era `sc4336p`)
 
-### 3. Driver sensor (3 bugs corregidos)
-- `DATARATE_SEL`: 891 → 1782 Mbps
-- `0x3A50/51/52`: valores incorrectos → 0x62/0x01/0x19
-- `INCK_SEL`: 0x03 (27MHz externo) → 0x01 (37.125MHz interno)
+### 3. Driver sensor (múltiples fixes aplicados)
+- **INCK_SEL**: 0x01 (interno) → 0x03 (27MHz externo del SoC) — SigmaStar reference lo confirma
+- **DATARATE_SEL**: 1782 → 891 Mbps (SDR, `data_rate=0` en INI)
+- **0x3A50/51/52**: 0x62/0x01/0x19 → 0xFF/0x03/0x00 (12-bit normal output, SigmaStar)
+- **WINMODE**: 0x00 (all pixel) → 0x04 (HD1080 crop, SigmaStar reference)
+- **Crop registers**: Agregados 0x303C=0x08, 0x303E=0x80, 0x303F=0x07, 0x3044=0x08, 0x3046=0x38, 0x3047=0x04
+- **cmos_restart()**: Cambiado hardcode DATARATE_1782 → DATARATE_891
+- **imx662_restart_mode()**: Re-escritura completa de modo regs tras standby enter (WINMODE, crop, ADBIT, MDBIT, 0x3A50-52, DATARATE_SEL, LANEMODE, HMAX, VMAX)
+- **cmos_isp_init()**: Agregado sensor reset sequence en `imx662_enable_mclk()`
+- **Link fix**: `sensor_common.o` debe linkearse (proporciona cis_register_callback, etc.)
 
 ### 4. HMAX byte order
 - Antes: HIGH byte primero en 0x302C → HMAX=48135 (WRONG)
@@ -178,21 +338,62 @@ El registro 0x3000=0x01 entra en standby. 0x3000=0x00 sale de standby. 0x3001=0x
 
 ## Archivos del proyecto
 
-### `vi_raw_capture.c` — Streaming server TCP
+Todos los utilitarios de prueba viven en `utils/` (compilar/ejecutar desde ahí).
+
+### `utils/astro_streamer.c` — Streaming server TCP (EL QUE FUNCIONA)
+- Compilación: ver abajo
+- Inicializa todo desde cero (MPI, VB, MCLK, sensor I2C, VI pipeline)
+- TCP server en puerto 5000 default (usar **5999**: `astro_streamer 5999`)
+- Envía frames raw12 por TCP con **header de 48 bytes** (magic "AS") — ver `recv_astro.py`
+- **Secuencia VB que funciona:** `vb_exit()` → `vb_set_cfg(common_pool blk=6)` → `vb_init()`
+  → `vb_get_common_pool_id()` (usar common pool, NO `create_pool()`) → `init_mod_common_pool(VI)`
+- `pipe_attr.vc_num = 0` (default) → **30fps exactos confirmados**
+- Flags: `--bench` / `--bench=N` (mide fps sin TCP, N=segundos), `--sweep`, `--incksel=N`,
+  `--datarate=N`, `--vc=N` (override vc_num), `--shrconv=N`
+- No escribe a disco (evita OOM). Cleanup: `_exit(0)` para evitar kernel panic
+- **IMPORTANTE:** `kill -9` corrompe el estado VB → siguiente run falla "VB pool FAILED"
+  → requiere reboot limpio. Terminar con SIGTERM (romper el `accept()` con un cliente TCP
+  temporal si no hay cliente conectado) o reboot.
+
+### `utils/vi_raw_capture.c` — Streaming server TCP (ROTO tras rebuild)
 - Compilación: ver abajo
 - Inicializa todo desde cero (MPI, VB, MCLK, sensor I2C, VI pipeline)
 - TCP server en puerto 5000 (configurable por arg)
 - Envía frames raw12 por TCP con header de 12 bytes
 - No escribe a disco (evita OOM)
 - Cleanup: `_exit(0)` para evitar kernel panic
+- Flags: `--bench` (mide fps sin TCP), `--sweep` (barre INCK_SEL/DATARATE relockeando
+  PLL), `--incksel=N` (override 0x3014), `--datarate=N` (override 0x3015), `--vc=N`
+  (override `pipe_attr.vc_num`, default 1)
+- **IMPORTANTE:** defaults corregidos INCK_SEL=0x03 + DATARATE_SEL=0x05 (30fps). La
+  tabla estática `imx662_init_common`/`imx662_init_mode` aún tiene INCK=0x01/DR=0x02
+  (WRONG) pero el override post-standby-exit la corrige en runtime.
+- **ROTO desde el rebuild (2026-08-09):** usa `create_pool()` (pool usuario, 4 bloques) +
+  vc_num=1 → `get_chn_frame 0xa0108016`. NO usar — ver astro_streamer arriba.
+- **IMPORTANTE:** `kill -9` corrompe el estado VB → siguiente run falla "VB pool FAILED"
+  → requiere reboot limpio. Terminar con SIGTERM (teardown limpio) o reboot.
 
-### `recv_raw.py` — Receiver OpenCV (PC)
+### `utils/recv_astro.py` — Receiver OpenCV (PC, para astro_streamer)
+- Recibe frames por TCP del SoC en puerto **5999**
+- Lee header de 48 bytes (magic "AS") → convierte raw12 → visualización (Bayer/grayscale)
+- Controles: q=salir, s=screenshot, etc.
+
+### `utils/recv_raw.py` — Receiver OpenCV (PC)
 - Recibe frames por TCP del SoC
 - Convierte raw12 → visualización (Bayer color o grayscale)
 - Controles: q=salir, s=screenshot, g=grayscale, b=bayer, +/- brillo
 
-### `i2c_recovery.c` — GPIO bit-bang I2C bus recovery
-### `i2c_test.c` — I2C + SPI diagnostic test
+### `utils/i2c_recovery.c` — GPIO bit-bang I2C bus recovery
+### `utils/i2c_test.c` — I2C + SPI diagnostic test
+### `utils/i2c_direct.c` / `i2c_dump.c` / `i2c_read.c` / `i2c_mclk.c` — I2C diagnostics
+
+### `utils/fix_pixel_rate.c` / `utils/fix_pixel_rate.so` — LD_PRELOAD pixel_rate fix
+- Intercepta `ss_mpi_vi_set_pipe_online_clock(pipe, pixel_rate)`
+- Fuerza pixel_rate 68416666 → 74250000 en runtime
+- Compilación: `$CC -fPIC -shared -o fix_pixel_rate.so fix_pixel_rate.c -ldl`
+- Deploy: `/root/fix_pixel_rate.so` (en el device)
+- Uso: `LD_PRELOAD=/root/fix_pixel_rate.so majestic`
+- **No resuelve VENC timeout** (probado 2026-08-08)
 
 ### Driver sensor (build output, se sobreescribe al rebuild)
 ```
@@ -217,11 +418,13 @@ output/build/hisilicon-opensdk-ff20187b/libraries/sensor/hi3516cv6xx/sony_imx662
 
 ## Compilación
 
+Desde `utils/` (paths relativos a la raíz del firmware):
+
 ```bash
-SDK=output/host/opt/ext-toolchain/sdk
-CC=output/host/bin/arm-openipc-linux-musleabi-gcc
-KO=output/build/hisilicon-opensdk-ff20187b/kernel/include/hi3516cv6xx
-MIPI=output/build/hisilicon-opensdk-ff20187b/kernel/mipi_rx/hi3516cv6xx/include
+SDK=../output/host/opt/ext-toolchain/sdk
+CC=../output/host/bin/arm-openipc-linux-musleabi-gcc
+KO=../output/build/hisilicon-opensdk-ff20187b/kernel/include/hi3516cv6xx
+MIPI=../output/build/hisilicon-opensdk-ff20187b/kernel/mipi_rx/hi3516cv6xx/include
 
 $CC -o vi_raw_capture vi_raw_capture.c \
   -I$SDK/include -I$KO -I$KO/isp_ext_inc -I$MIPI \
@@ -266,25 +469,30 @@ ch.recv_exit_status()
 
 ## Secuencia de uso
 
-### Streaming raw12 (modo actual)
+### Streaming raw12 (modo actual) — astro_streamer
 
 **En el device** (después de reboot limpio):
 ```bash
-/tmp/vi_raw_capture          # puerto 5000 default
-/tmp/vi_raw_capture 7000     # puerto custom
+/tmp/astro_streamer 5999     # EL QUE FUNCIONA (30fps, header 48B "AS")
+/tmp/astro_streamer 5999 --bench 10   # medir fps sin TCP
 ```
 
 **En el PC:**
 ```bash
 pip3 install opencv-python numpy
-python3 recv_raw.py 192.168.1.5        # puerto 5000
-python3 recv_raw.py 192.168.1.5 7000   # puerto custom
+python3 recv_astro.py 192.168.1.16 5999
 ```
+
+### NOTA: vi_raw_capture NO funciona tras el rebuild (2026-08-09)
+```bash
+/tmp/vi_raw_capture 5000     # get_chn_frame 0xa0108016 — ROTO
+```
+Usar `astro_streamer` (common pool + vc_num=0) en su lugar.
 
 ### Si majestic está corriendo (test I2C rápido)
 ```bash
 killall -9 majestic
-/tmp/vi_raw_capture
+/tmp/astro_streamer 5999
 ```
 
 ---
@@ -296,6 +504,30 @@ killall -9 majestic
 - `mode_2k_regs[]`: 1920x1100 all-pixel, HMAX=990, VMAX=1250
 - `PIXEL_RATE = 74,250,000 Hz`
 - Link freqs: 0x02=1782Mbps, 0x05=891Mbps, etc.
+
+## Referencias GitHub — conclusión común (2026-08-09)
+
+Se revisaron 8 repos de IMX662 para validar la configuración del sensor:
+
+| Repo | Plataforma | Aporte clave |
+|------|-----------|--------------|
+| `pauliustumas/imx662` | RPi4, 74.25MHz cristal | **INCK_SEL correcto = TODO.** Con 24MHz (INCK 0x04): frames parciales (1–275/1100), ~5fps, inestable. Con 74.25MHz (INCK 0x00): 36–60fps estable. Síntoma clásico de reloj mal configurado. |
+| `libc0607/imx662_modes` | OpenIPC + SigmaStar (SSC338Q) | **27MHz input + 2 lanes funciona.** Tabla modos: 1920x1080@30fps 12bit → VMAX=1250, HMAX=1980 (¡exacto a nuestro readback!). INCK=27MHz + DATARATE=891Mbps = 30fps. |
+| `BellssGit/IMX662_module_for_raspberry_pi` | Hardware RPi | Datasheet, SRM, register map. I2C 0x1a (0x34). Referencia hardware. |
+| `will127534/imx662-v4l2-driver` | RPi5/RP1 | Tabla link-frequency: 891Mbps=30fps@1080p, 1782Mbps=60fps. |
+| `AraKiLiu/imx662-v4l2-driver` | RPi5 | 12-bit + binning fix. Requiere kernel 6.12+. |
+| `dio4/imx662-camera-project` | RPi4 raw | 10-bit raw directo, "green frames" resuelto con demosaic RG→BGR. |
+| `neskin/imx662-camera-dashboard` | RPi | Solo dashboard web, no aporta. |
+| `pauliustumas` nota | — | "the ISP is what makes it look good" — el raw demosaicado se ve mal, el ISP hardware es lo que da imagen buena. |
+
+**CONCLUSIÓN COMÚN:**
+1. **INCK_SEL debe coincidir con el clock real del sensor.** 2 fuentes independientes confirman: reloj mal configurado → ~5fps + frames parciales. Nuestra config INCK=0x03 (27MHz) + DR=0x05 (891Mbps) es CORRECTA y validada.
+2. **Nuestra tabla de modos es idéntica a la de libc0607** (1920x1080@30, 12bit, VMAX=1250, HMAX=1980) que funciona en OpenIPC.
+3. **Modo 12-bit debe seleccionarse explícitamente** (default 10-bit da cero/garbage pixeles en varias plataformas).
+4. **El problema de majestic NO es config del sensor** — es del pipeline VI/ISP online (pixel_rate, `mipirx not set lane mode`, ISP online vs bypass). La config del sensor está validada contra referencias que funcionan.
+5. **Dirección I2C 0x1a y chip ID 0x30DC=0x32** son consistentes en todos los repos.
+
+**DECISIÓN:** seguir con streamer propio (ISP bypass, vi_raw_capture/astro_streamer), no seguir peleando con majestic.
 
 ---
 
@@ -338,7 +570,12 @@ devrect_h=1080
 
 ## Pendiente
 
-- [ ] Verificar imagen real con `recv_raw.py` + OpenCV
+- [ ] **BUG ACTIVO (2026-08-10): frame blanco estático `f0 0f ff` tras reboot** → MIPI RX no recibe datos. Ver `CONTEXT.md` + `tools/prompts/diagnostico-mipi.md`
+- [ ] Verificar imagen real con `recv_astro.py` + OpenCV
 - [ ] Evaluar calidad de imagen (Bayer pattern correcto, exposición, etc.)
+- [ ] Test pendiente: `vi_raw_capture --vc=0` para confirmar si lo que rompe es `create_pool()` (pool usuario) o el vc_num=1
 - [ ] Investigar CRC errors en MIPI RX (`vc0_crc_err: 1935`)
 - [ ] Considerar si el kernel panic de `sys_exit()` se puede resolver sin vb_exit()
+- [ ] Investigar `mipirx not set lane mode` en dmesg (MIPI RX no configurado)
+- [x] ~~Majestic vc_num=1 test~~ → **DECIDIDO (2026-08-09): abandonar majestic**, streamer propio con ISP bypass
+- [x] ~~Decidir streamer propio vs majestic~~ → **astro_streamer (vc_num=0 + common pool) es EL que funciona**
