@@ -18,3 +18,10 @@ output/
 # Python
 __pycache__/
 *.pyc
+
+# Solo local (NO subir a GitHub)
+docs/
+golden_sets/
+AGENTS.md
+opencode.json
+CONTEXT.md
