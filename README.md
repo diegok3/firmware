@@ -22,6 +22,8 @@ and on the [wiki][wiki].
 
 This tree is tested against the following camera module:
 
+- **Module:** SIP-K662C6S — 深圳市视迈特科技有限公司 (Shenzhen SMT / Shimaite Tech)
+  [product page](https://www.smtsec.com/productinfo/1530316.html)
 - **SoC:** Hi3516CV610
 - **Sensor:** Sony IMX662 (1080p30, raw12)
 - **MIPI:** 1 physical lane (891 Mbps, `LANEMODE` single-lane)
