@@ -18,6 +18,22 @@ expected to grow further.
 More information about the [project][project] is available in our [website][website]
 and on the [wiki][wiki].
 
+## Tested hardware
+
+This tree is tested against the following camera module:
+
+- **SoC:** Hi3516CV610
+- **Sensor:** Sony IMX662 (1080p30, raw12)
+- **MIPI:** 1 physical lane (891 Mbps, `LANEMODE` single-lane)
+
+The IMX662 support in this branch (`feat/imx662-driver`) was developed and
+verified specifically on that single-lane module. The sensor is addressed over
+I2C bus 0 (addr `0x1a`), with `INCK_SEL=0x03` (27 MHz) and
+`DATARATE_SEL=0x05` (891 Mbps) yielding exactly 30 fps.
+
+> Note: OpenIPC's upstream master also carries an AHD/single-lane config for this
+> sensor family; this branch is the tested reference for the 1-lane hardware above.
+
 ## Support
 
 OpenIPC offers two levels of support.
