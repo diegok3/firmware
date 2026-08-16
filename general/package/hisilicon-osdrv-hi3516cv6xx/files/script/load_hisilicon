@@ -156,7 +156,7 @@ insert_ko() {
 	# modprobe open_user
 	case ${socmodel} in 20s|20g|00s|00g) modprobe open_aiisp ;; esac
 	# modprobe open_uvc
-	modprobe open_pm
+	# modprobe open_pm   # HANGA el SoC: SVB/ajuste de voltaje inválido + PLL power-down (ver docs/parches/PATCH_OPEN_SYS.md)
 	modprobe open_wdt
 	insert_security_subsys
 }
@@ -164,7 +164,7 @@ insert_ko() {
 remove_ko() {
 	remove_security_subsys
 	rmmod open_wdt 2>/dev/null
-	rmmod open_pm
+	# rmmod open_pm   # no se carga (HANG del SoC, ver arriba)
 	# rmmod open_uvc
 	rmmod open_aiisp &> /dev/null
 	# rmmod open_user
