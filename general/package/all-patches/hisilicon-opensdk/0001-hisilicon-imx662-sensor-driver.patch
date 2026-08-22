@@ -1,5 +1,6 @@
 diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile b/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile
 new file mode 100644
+index 0000000..0889ccb
 --- /dev/null
 +++ b/libraries/sensor/hi3516cv6xx/sony_imx662/Makefile
 @@ -0,0 +1,35 @@
@@ -40,9 +41,10 @@ new file mode 100644
 +	-rm -f $(OBJS) $(LIB_NAME).so $(LIB_NAME).a
 diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h
 new file mode 100644
+index 0000000..6331c7e
 --- /dev/null
 +++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cfg.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,176 @@
 +/*
 +  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
 + */
@@ -58,39 +60,156 @@ new file mode 100644
 +
 +#include "sensor_common.h"
 +
-+/* IMX662 AllPixel mode global init sequence (written once at cmos_isp_init).
-+ * Mode-specific registers (HMAX, DATARATE_SEL, LANEMODE, ADBIT, MDBIT)
-+ * are configured per-mode in imx662_cmos.c set_image_mode function. */
 +static const cis_reg_cfg g_imx662_init_seq[] = {
-+    {0x3000, 0x01},    /* enter standby */
-+    {0x3001, 0x00},    /* REGHOLD release */
-+    {0x3002, 0x01},    /* XMSTA start */
-+    {0x301A, 0x00},    /* WDMODE = Normal */
-+    {0x301B, 0x00},    /* ADDMODE = non-binning */
-+    {0x301E, 0x01},    /* VCMODE = virtual channel 1 */
-+    {0x30A4, 0x02},    /* XVSOUTSEL */
-+    {0x30A6, 0x0F},    /* XVS/XHS DRIVE HiZ */
-+    {0x30DC, 0x32},    /* BLKLEVEL low byte */
-+    {0x30DD, 0x40},    /* BLKLEVEL high byte → full = 0x432 */
-+    {0x3400, 0x01},    /* GAIN_PGC_FIDMD */
-+    {0x3444, 0xAC},    /* PLL_ctrl1 */
-+    {0x3445, 0x09},    /* PLL_ctrl2 */
-+    {0x3446, 0x01},    /* PLL_ctrl3 */
-+    {0x3460, 0x21},    /* Normal mode (22h=C HDR mode) */
-+    {0x3492, 0x08},    /* RESERVED */
-+    {0x349E, 0x05},    /* MIPI_TX_CTRL1 */
-+    {0x349F, 0x19},    /* MIPI_TX_CTRL2 */
-+    {0x34A0, 0x00},    /* MIPI_TX_CTRL3 */
-+    {0x34A1, 0x01},    /* MIPI_TX_CTRL4 */
-+    {0x34A2, 0x92},    /* MIPI_PHY_Tx1 */
-+    {0x34A4, 0x91},    /* MIPI_PHY_Tx2 */
-+    {0x34A6, 0x8C},    /* MIPI_PHY_Tx3 */
-+    {0x34A8, 0x87},    /* MIPI_PHY_Tx4 */
-+    {0x34AA, 0x82},    /* MIPI_PHY_Tx5 */
-+    {0x34AC, 0x78},    /* MIPI_PHY_Tx6 */
-+    {0x34AE, 0x6E},    /* MIPI_PHY_Tx7 */
-+    {0x3C40, 0x06},    /* Normal mode, CHDR=05h */
-+    {0x3014, 0x03},    /* INCK_SEL = 3 (27MHz, board MCLK) */
++    {0x3000, 0x01},
++    {0x3001, 0x00},
++    {0x3002, 0x00},
++    {0x3014, 0x03},  /* INCK_SEL = 27 MHz (external MCLK from SoC) */
++    {0x301A, 0x00},
++    {0x301B, 0x00},
++    {0x301C, 0x00},
++    {0x301E, 0x01},
++    {0x3020, 0x00},
++    {0x3021, 0x00},
++    {0x3026, 0x04},
++    {0x3030, 0x00},
++    {0x3031, 0x00},
++    {0x3032, 0x00},
++    {0x303C, 0x08},  /* Cropping PIX HSTART[7:0] = 8 */
++    {0x303D, 0x00},  /* Cropping PIX HSTART[12:8] */
++    {0x303E, 0x80},  /* Cropping PIX H WIDTH[7:0] = 1920 */
++    {0x303F, 0x07},  /* Cropping PIX H WIDTH[12:8] */
++    {0x3044, 0x08},  /* Cropping PIX VSTART[7:0] = 8 */
++    {0x3045, 0x00},  /* Cropping PIX VSTART[11:8] */
++    {0x3046, 0x38},  /* Cropping PIX V WIDTH[7:0] = 1080 */
++    {0x3047, 0x04},  /* Cropping PIX V WIDTH[11:8] */
++    {0x3054, 0x0E},
++    {0x3055, 0x00},
++    {0x3056, 0x00},
++    {0x3058, 0x8A},
++    {0x3059, 0x01},
++    {0x305A, 0x00},
++    {0x3060, 0x16},
++    {0x3061, 0x01},
++    {0x3062, 0x00},
++    {0x3064, 0xC4},
++    {0x3065, 0x0C},
++    {0x3066, 0x00},
++    {0x3069, 0x00},
++    {0x306B, 0x00},
++    {0x3070, 0x00},
++    {0x3071, 0x00},
++    {0x3072, 0x00},
++    {0x3073, 0x00},
++    {0x3074, 0x00},
++    {0x3075, 0x00},
++    {0x3081, 0x00},
++    {0x308C, 0x00},
++    {0x308D, 0x01},
++    {0x3094, 0x00},
++    {0x3095, 0x00},
++    {0x3096, 0x00},
++    {0x3097, 0x00},
++    {0x309C, 0x00},
++    {0x309D, 0x00},
++    {0x30A4, 0xAA},
++    {0x30A6, 0x0F},
++    {0x30CC, 0x00},
++    {0x30CD, 0x00},
++    {0x30DC, 0x32},
++    {0x30DD, 0x40},
++    {0x3400, 0x01},
++    {0x3444, 0xAC},
++    {0x3460, 0x21},
++    {0x3492, 0x08},
++    {0x3B00, 0x39},
++    {0x3B23, 0x2D},
++    {0x3B45, 0x04},
++    {0x3C0A, 0x1F},
++    {0x3C0B, 0x1E},
++    {0x3C38, 0x21},
++    {0x3C40, 0x06},
++    {0x3C44, 0x00},
++    {0x3CB6, 0xD8},
++    {0x3CC4, 0xDA},
++    {0x3E24, 0x79},
++    {0x3E2C, 0x15},
++    {0x3EDC, 0x2D},
++    {0x4498, 0x05},
++    {0x4499, 0x06},
++    {0x449A, 0x00},
++    {0x449B, 0x10},
++    {0x449C, 0x19},
++    {0x449D, 0x00},
++    {0x449E, 0x32},
++    {0x449F, 0x01},
++    {0x44A0, 0x92},
++    {0x44A2, 0x91},
++    {0x44A4, 0x8C},
++    {0x44A6, 0x87},
++    {0x44A8, 0x82},
++    {0x44AA, 0x78},
++    {0x44AC, 0x6E},
++    {0x44AE, 0x69},
++    {0x44B0, 0x92},
++    {0x44B2, 0x91},
++    {0x44B4, 0x8C},
++    {0x44B6, 0x87},
++    {0x44B8, 0x82},
++    {0x44BA, 0x78},
++    {0x44BC, 0x6E},
++    {0x44BE, 0x69},
++    {0x44C1, 0x01},
++    {0x44C2, 0x7F},
++    {0x44C3, 0x01},
++    {0x44C4, 0x7A},
++    {0x44C5, 0x01},
++    {0x44C6, 0x7A},
++    {0x44C7, 0x01},
++    {0x44C8, 0x70},
++    {0x44C9, 0x01},
++    {0x44CA, 0x6B},
++    {0x44CB, 0x01},
++    {0x44CC, 0x6B},
++    {0x44CD, 0x01},
++    {0x44CE, 0x5C},
++    {0x44CF, 0x01},
++    {0x44D0, 0x7F},
++    {0x44D1, 0x01},
++    {0x44D2, 0x7F},
++    {0x44D3, 0x01},
++    {0x44D4, 0x7A},
++    {0x44D5, 0x01},
++    {0x44D6, 0x7A},
++    {0x44D7, 0x01},
++    {0x44D8, 0x70},
++    {0x44D9, 0x01},
++    {0x44DA, 0x6B},
++    {0x44DB, 0x01},
++    {0x44DC, 0x6B},
++    {0x44DD, 0x01},
++    {0x44DE, 0x5C},
++    {0x44DF, 0x01},
++    {0x4534, 0x1C},
++    {0x4535, 0x03},
++    {0x4538, 0x1C},
++    {0x4539, 0x1C},
++    {0x453A, 0x1C},
++    {0x453B, 0x1C},
++    {0x453C, 0x1C},
++    {0x453D, 0x1C},
++    {0x453E, 0x1C},
++    {0x453F, 0x1C},
++    {0x4540, 0x1C},
++    {0x4541, 0x03},
++    {0x4542, 0x03},
++    {0x4543, 0x03},
++    {0x4544, 0x03},
++    {0x4545, 0x03},
++    {0x4546, 0x03},
++    {0x4547, 0x03},
++    {0x4548, 0x03},
++    {0x4549, 0x03},
 +};
 +
 +#define IMX662_INIT_SEQ_LEN   (sizeof(g_imx662_init_seq) / sizeof(g_imx662_init_seq[0]))
@@ -102,608 +221,28 @@ new file mode 100644
 +#endif
 +
 +#endif /* IMX662_CFG_H_ */
-diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
-new file mode 100644
---- /dev/null
-+++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
-@@ -0,0 +1,135 @@
-+/*
-+  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
-+ */
-+
-+#ifndef IMX662_CMOS_H_
-+#define IMX662_CMOS_H_
-+
-+#include "ot_common_isp.h"
-+#include "ot_sns_ctrl.h"
-+#include "securec.h"
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+extern "C" {
-+#endif
-+#endif
-+
-+/* sensor ID & resolution */
-+#define IMX662_ID               662
-+#define IMX662_WIDTH            1920
-+#define IMX662_HEIGHT           1080
-+#define IMX662_SENSOR_W         1920
-+#define IMX662_SENSOR_H         1080
-+
-+/* vmax (fixed 1250 for all-pixel modes), hmax per mode */
-+#define IMX662_VMAX_DEFAULT     1250
-+#define IMX662_HMAX_1080P_30FPS 1980
-+
-+/* register bits */
-+#define IMX662_STANDBY_ENTER    0x01
-+#define IMX662_STANDBY_EXIT     0x00
-+#define IMX662_WINMODE_ALLPIXEL 0x00
-+#define IMX662_ADBIT_10BIT      0x00
-+#define IMX662_ADBIT_12BIT      0x01
-+#define IMX662_MDBIT_10BIT      0x00
-+#define IMX662_MDBIT_12BIT      0x01
-+#define IMX662_DATARATE_1782    0x02
-+#define IMX662_DATARATE_720     0x06
-+#define IMX662_LANEMODE_1LANE   0x00
-+#define IMX662_LANEMODE_4LANE   0x03
-+#define IMX662_REG_MIRROR_FLIP  0x3030
-+#define IMX662_MIRROR_NORMAL    0x00
-+
-+/* i2c bus config */
-+#define IMX662_I2C_ADDR         0x34
-+#define IMX662_ADDR_BYTE        2
-+#define IMX662_DATA_BYTE        1
-+
-+/* frame lines */
-+#define IMX662_FULL_LINES_MAX   0xFFFF
-+#define IMX662_INCREASE_LINES   1
-+#define IMX662_VMAX_VAL         1250
-+#define IMX662_VMAX             (IMX662_VMAX_VAL + IMX662_INCREASE_LINES)
-+#define IMX662_FPS_MAX          10.0f
-+#define IMX662_FPS_MIN          1.0f
-+#define IMX662_MODE_LINEAR      0
-+
-+/* ae configs */
-+#define IMX662_AGAIN_MIN        1024
-+#define IMX662_AGAIN_MAX        32768
-+#define IMX662_DGAIN_MIN        1024
-+#define IMX662_DGAIN_MAX        16384
-+
-+#define ISP_DGAIN_SHIFT         8
-+#define ISP_DGAIN_TARGET_MIN    1
-+#define ISP_DGAIN_TARGET_MAX    128
-+#define INT_TIME_ACCURACY       1
-+#define AGAIN_ACCURACY          1
-+#define DGAIN_ACCURACY          0.015625
-+
-+#define FL_OFFSET_LINEAR        4
-+
-+/* awb calibrate configs (placeholders until tuned) */
-+#define CALIBRATE_STATIC_TEMP       5000
-+#define CALIBRATE_STATIC_WB_R_GAIN  256
-+#define CALIBRATE_STATIC_WB_GR_GAIN 256
-+#define CALIBRATE_STATIC_WB_GB_GAIN 256
-+#define CALIBRATE_STATIC_WB_B_GAIN  256
-+
-+#define CALIBRATE_AWB_P1 0
-+#define CALIBRATE_AWB_P2 256
-+#define CALIBRATE_AWB_Q1 0
-+#define CALIBRATE_AWB_A1 11800
-+#define CALIBRATE_AWB_B1 10240
-+#define CALIBRATE_AWB_C1 0
-+
-+#define GOLDEN_RGAIN             0
-+#define GOLDEN_BGAIN             0
-+
-+/* other configs */
-+#define STANDARD_FPS             30
-+#define FLICKER_FREQ             (50 * 256)
-+#define INIT_EXP_DEFAULT         4000
-+#define MAX_INT_TIME_TARGET      65535
-+#define AE_COMENSATION_DEFAULT   0x40
-+
-+/* black level */
-+#define BLACK_LEVEL_DEFAULT      0x100
-+
-+/* assist macros */
-+#define higher_4bits(x) (((x) & 0xf0000) >> 16)
-+#define high_8bits(x)   (((x) & 0xff00) >> 8)
-+#define low_8bits(x)    ((x) & 0x00ff)
-+
-+/* sensor modes */
-+typedef enum {
-+    IMX662_1080P_30FPS_12BIT_1LANE_MODE = 0,
-+    IMX662_1080P_60FPS_12BIT_1LANE_MODE,
-+    IMX662_MODE_MAX
-+} imx662_res_mode;
-+
-+/* register array index for per-frame updates */
-+typedef enum {
-+    PAGE_IDX = 0,
-+    EXP_REG_MSB_IDX,
-+    EXP_REG_MID_IDX,
-+    EXP_REG_LSB_IDX,
-+    VMAX_REG_MSB_IDX,
-+    VMAX_REG_MID_IDX,
-+    VMAX_REG_LSB_IDX,
-+    AGAIN_REG_LSB_IDX,
-+    AGAIN_REG_MSB_IDX,
-+    DGAIN_REG_LSB_IDX,
-+    DGAIN_REG_MSB_IDX,
-+    VALUE_IDX,
-+    REG_MAX_IDX
-+} imx662_linear_reg_index;
-+
-+ot_isp_sns_obj *imx662_get_obj(td_void);
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+}
-+#endif
-+#endif /* End of #ifdef __cplusplus */
-+#endif /* IMX662_CMOS_H_ */
-diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
-new file mode 100644
---- /dev/null
-+++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
-@@ -0,0 +1,169 @@
-+/*
-+  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
-+ */
-+
-+#ifndef IMX662_CMOS_PARAM_H_
-+#define IMX662_CMOS_PARAM_H_
-+
-+#include "ot_common_awb.h"
-+#include "ot_common_isp.h"
-+#include "ot_common_sns.h"
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+extern "C" {
-+#endif
-+#endif
-+
-+/* ISP dgain target range */
-+#define IMX662_ISP_DGAIN_TARGET_MIN      1
-+#define IMX662_ISP_DGAIN_TARGET_MAX      128
-+
-+static ot_isp_piris_attr g_piris = {
-+    0,   /* bStepFNOTableChange */
-+    1,   /* bZeroIsMax */
-+    94,  /* u16TotalStep */
-+    62,  /* u16StepCount */
-+    /* Step-F number mapping table. F1.0 is 1024 and F32.0 is 1 */
-+    { 30,  35,  40,  45,  50,  56,  61,  67,  73,  79,  85,  92,  98,  105, 112, 120, 127, 135, 143, 150, 158,
-+      166, 174, 183, 191, 200, 208, 217, 225, 234, 243, 252, 261, 270, 279, 289, 298, 307, 316, 325, 335, 344,
-+      353, 362, 372, 381, 390, 399, 408, 417, 426, 435, 444, 453, 462, 470, 478, 486, 493, 500, 506, 512 },
-+    OT_ISP_IRIS_F_NO_1_4,   /* enMaxIrisFNOTarget */
-+    OT_ISP_IRIS_F_NO_5_6,   /* enMinIrisFNOTarget */
-+    1,
-+    512,
-+    32
-+};
-+
-+static const ot_isp_cmos_black_level g_cmos_blc = {
-+    TD_FALSE, /* user_black_level_en */
-+    {
-+        {1200, 1200, 1200, 1200},
-+        {1200, 1200, 1200, 1200},
-+        {1200, 1200, 1200, 1200},
-+        {1200, 1200, 1200, 1200},
-+    },   /* user_black_level */
-+    OT_ISP_BLACK_LEVEL_MODE_AUTO, /* ot_isp_black_level_mode */
-+    {
-+        {
-+            {1024, 1024, 1024, 1024},
-+            {1024, 1024, 1024, 1024},
-+            {1024, 1024, 1024, 1024},
-+            {1024, 1024, 1024, 1024},
-+        },
-+    }, /* manual_attr */
-+};
-+
-+/* AWB CCM calibration - placeholder, populate from IMX662 tuning data */
-+static ot_isp_awb_ccm g_awb_ccm = {
-+    4,
-+    {
-+        {
-+            6473,
-+            { 0x017b, 0x8076, 0x8005, 0x8042, 0x017f, 0x803d, 0x000b, 0x8097, 0x018c },
-+        },
-+        {
-+            5132,
-+            { 0x0189, 0x809f, 0x0016, 0x8037, 0x013c, 0x8005, 0x001f, 0x80d7, 0x01b8 },
-+        },
-+        {
-+            3565,
-+            { 0x0190, 0x8075, 0x801b, 0x8053, 0x0186, 0x8033, 0x0025, 0x80ca, 0x01a5 },
-+        },
-+        {
-+            2580,
-+            { 0x01b5, 0x80aa, 0x800b, 0x8050, 0x0153, 0x8003, 0x0048, 0x812d, 0x01e5 },
-+        },
-+    },
-+};
-+
-+static ot_isp_awb_agc_table g_awb_agc_table = {
-+    1, /* bvalid */
-+    { 0x80, 0x76, 0x70, 0x6C, 0x69, 0x66, 0x5A, 0x4E, 0x44, 0x40, 0x38, 0x38, 0x38, 0x38, 0x38, 0x38 }
-+};
-+
-+/* ISP default config - linear mode */
-+#define IMX662_LINEAR_FRAMERATE                    10
-+#define IMX662_FULL_LINES_MAX                      0xFFFF
-+
-+/* AE */
-+#define IMX662_AGAIN_MIN                             1024   /* min analog gain = 1x */
-+#define IMX662_AGAIN_MAX                           32768    /* max analog gain, sensor specific */
-+#define IMX662_AGAIN_STEP                            16
-+#define IMX662_DGAIN_MIN                             1024   /* min digital gain = 1x */
-+#define IMX662_DGAIN_MAX                           16384    /* max digital gain */
-+#define IMX662_DGAIN_STEP                            16
-+#define IMX662_ISP_DGAIN_SHIFT                       8
-+#define IMX662_AE_COMPENSATION_DEFAULT              0x40
-+#define IMX662_AE_EXP_MODE                     OT_ISP_AE_EXP_HIGHLIGHT_PRIOR
-+
-+#define IMX662_INT_TIME_ACCURACY                     1
-+#define IMX662_AGAIN_ACCURACY                        1
-+#define IMX662_DGAIN_ACCURACY                     0.015625
-+#define IMX662_FL_OFFSET_LINEAR                          4
-+#define IMX662_FL_OFFSET_WDR_SHORT                     4
-+#define IMX662_FL_OFFSET_WDR_LONG                      4
-+#define IMX662_MAX_INT_TIME_TARGET               65535
-+
-+/* Piris (iris) */
-+#define IMX662_PIRIS_ATTR                             OT_ISP_IRIS_HW
-+
-+/* Black level */
-+#define IMX662_BLACK_LEVEL_DEFAULT                      0x100
-+#define IMX662_BLACK_LEVEL_MIN                          0x000
-+#define IMX662_BLACK_LEVEL_MAX                          0xFFF
-+
-+/* DNG/WB calibration - placeholders, need to be populated from sensor datasheet */
-+#define IMX662_CALIBRATE_STATIC_TEMP              5000
-+#define IMX662_CALIBRATE_STATIC_WB_R_GAIN         256
-+#define IMX662_CALIBRATE_STATIC_WB_GR_GAIN        256
-+#define IMX662_CALIBRATE_STATIC_WB_GB_GAIN        256
-+#define IMX662_CALIBRATE_STATIC_WB_B_GAIN         256
-+
-+#define IMX662_CALIBRATE_AWB_P1                     0
-+#define IMX662_CALIBRATE_AWB_P2                     256
-+#define IMX662_CALIBRATE_AWB_Q1                     0
-+#define IMX662_CALIBRATE_AWB_A1                11800
-+#define IMX662_CALIBRATE_AWB_B1                10240
-+#define IMX662_CALIBRATE_AWB_C1                        0
-+
-+#define IMX662_GOLDEN_RGAIN                         0
-+#define IMX662_GOLDEN_BGAIN                         0
-+
-+/* WDR */
-+#define IMX662_WDR_MODE_NONE                  OT_WDR_MODE_NONE
-+#define IMX662_WDR_MODE_SHORT             OT_WDR_MODE_SHORT
-+#define IMX662_WDR_MODE_LONG                 OT_WDR_MODE_LONG
-+
-+/* Input clock */
-+#define IMX662_INPUT_CLOCK                       27000000
-+
-+/* VMAX register addresses (20-bit, 3 bytes) */
-+#define IMX662_VMAX_REG_LSB                          0x3028
-+#define IMX662_VMAX_REG_MID                          0x3029
-+#define IMX662_VMAX_REG_MSB                          0x302A
-+
-+/* HMAX register addresses (12-bit, 2 bytes) */
-+#define IMX662_HMAX_REG_LSB                          0x302C
-+#define IMX662_HMAX_REG_MSB                          0x302D
-+
-+/* Exposure register */
-+#define IMX662_EXP_REG_LSB                          0x3050
-+#define IMX662_EXP_REG_MID                          0x3051
-+#define IMX662_EXP_REG_MSB                          0x3052
-+
-+/* Global gain registers (analog, 16-bit) */
-+#define IMX662_AGAIN_REG_LSB                       0x3070
-+#define IMX662_AGAIN_REG_MSB                       0x3071
-+
-+/* Digital gain registers (16-bit) */
-+#define IMX662_DGAIN_REG_LSB                       0x0910
-+#define IMX662_DGAIN_REG_MSB                       0x0911
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+}
-+#endif
-+#endif
-+
-+#endif /* IMX662_CMOS_PARAM_H_ */
-diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
-new file mode 100644
---- /dev/null
-+++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
-@@ -0,0 +1,33 @@
-+/*
-+  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
-+ */
-+
-+#ifndef IMX662_SENSOR_CTRL_H_
-+#define IMX662_SENSOR_CTRL_H_
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+extern "C" {
-+#endif
-+#endif
-+
-+#include "sensor_common.h"
-+
-+/* write init sequence from cfg table */
-+td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len);
-+
-+/* per-mode linear init: writes global seq + mode-specific registers */
-+td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
-+    td_u8 adbit, td_u8 mdbit);
-+
-+/* standby / restart (restart re-applies mode timing) */
-+td_s32 imx662_standby_mode(cis_info *cis);
-+td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate);
-+
-+#ifdef __cplusplus
-+#if __cplusplus
-+}
-+#endif
-+#endif
-+
-+#endif /* IMX662_SENSOR_CTRL_H_ */
-diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
-new file mode 100644
---- /dev/null
-+++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
-@@ -0,0 +1,211 @@
-+/*
-+  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
-+ */
-+
-+#include "sensor_common.h"
-+#include "imx662_cmos.h"
-+#include "imx662_cfg.h"
-+
-+static void imx662_default_reg_init(cis_info *cis)
-+{
-+    td_u32 i;
-+    td_s32 ret = TD_SUCCESS;
-+    ot_isp_sns_state *past_sensor = TD_NULL;
-+
-+    past_sensor = cis->sns_state;
-+    for (i = 0; i < past_sensor->regs_info[0].reg_num; i++) {
-+        ret += cis_write_reg(&cis->i2c,
-+            past_sensor->regs_info[0].i2c_data[i].reg_addr,
-+            past_sensor->regs_info[0].i2c_data[i].data);
-+    }
-+
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write register failed!\n");
-+    }
-+    return;
-+}
-+
-+td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len)
-+{
-+    td_u32 i;
-+
-+    for (i = 0; i < len; i++) {
-+        sns_check_return(cis_write_reg(&cis->i2c, cfg->addr, cfg->data));
-+        cfg++;
-+    }
-+
-+    imx662_default_reg_init(cis);
-+
-+    return TD_SUCCESS;
-+}
-+
-+td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
-+    td_u8 adbit, td_u8 mdbit)
-+{
-+    td_s32 ret;
-+    td_u32 len;
-+    const cis_reg_cfg *cfg = g_imx662_init_seq;
-+
-+    sns_check_pointer_return(cis);
-+
-+    len = IMX662_INIT_SEQ_LEN;
-+    ret = imx662_reg_init(cis, cfg, len);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("imx662_reg_init failed!\n");
-+        return ret;
-+    }
-+
-+    /* Mode-specific registers */
-+    /* DATARATE_SEL */
-+    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3015 failed!\n");
-+        return ret;
-+    }
-+
-+    /* WINMODE */
-+    ret = cis_write_reg(&cis->i2c, 0x3018, IMX662_WINMODE_ALLPIXEL);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3018 failed!\n");
-+        return ret;
-+    }
-+
-+    /* LANEMODE */
-+    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3040 failed!\n");
-+        return ret;
-+    }
-+
-+    /* ADBIT */
-+    ret = cis_write_reg(&cis->i2c, 0x3022, adbit);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3022 failed!\n");
-+        return ret;
-+    }
-+
-+    /* MDBIT */
-+    ret = cis_write_reg(&cis->i2c, 0x3023, mdbit);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3023 failed!\n");
-+        return ret;
-+    }
-+
-+    /* HMAX — LSB first per datasheet: 0x302C=HMAX[7:0], 0x302D=HMAX[15:8] */
-+    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x302C failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x302D failed!\n");
-+        return ret;
-+    }
-+
-+    /* VMAX */
-+    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3028 failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3029 failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x302A failed!\n");
-+        return ret;
-+    }
-+
-+    /* Exit standby */
-+    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3000 exit standby failed!\n");
-+        return ret;
-+    }
-+
-+    /* 12-bit output mode config (must be written after standby exit) */
-+    ret = cis_write_reg(&cis->i2c, 0x3A50, 0x62);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3A50 failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x3A51, 0x01);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3A51 failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x3A52, 0x19);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write 0x3A52 failed!\n");
-+        return ret;
-+    }
-+
-+    /* Mirror normal */
-+    ret = cis_write_reg(&cis->i2c, IMX662_REG_MIRROR_FLIP, IMX662_MIRROR_NORMAL);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write mirror/flip failed!\n");
-+        return ret;
-+    }
-+
-+    return TD_SUCCESS;
-+}
-+
-+td_s32 imx662_standby_mode(cis_info *cis)
-+{
-+    td_s32 ret;
-+    sns_check_pointer_return(cis);
-+    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write standby failed!\n");
-+        return ret;
-+    }
-+    return TD_SUCCESS;
-+}
-+
-+td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate)
-+{
-+    td_s32 ret;
-+    sns_check_pointer_return(cis);
-+
-+    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write standby failed!\n");
-+        return ret;
-+    }
-+
-+    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write DATARATE_SEL failed!\n");
-+        return ret;
-+    }
-+
-+    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write LANEMODE failed!\n");
-+        return ret;
-+    }
-+
-+    /* HMAX — LSB first per datasheet */
-+    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write HMAX low failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write HMAX high failed!\n");
-+        return ret;
-+    }
-+
-+    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write VMAX low failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write VMAX mid failed!\n");
-+        return ret;
-+    }
-+    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write VMAX high failed!\n");
-+        return ret;
-+    }
-+
-+    cis_delay_ms(1);
-+
-+    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
-+    if (ret != TD_SUCCESS) {
-+        isp_err_trace("write exit standby failed!\n");
-+        return ret;
-+    }
-+
-+    return TD_SUCCESS;
-+}
 diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c
 new file mode 100644
+index 0000000..8246ea5
 --- /dev/null
 +++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.c
-@@ -0,0 +1,1057 @@
+@@ -0,0 +1,1276 @@
 +/*
 +  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
 + */
 +
 +#include <stdio.h>
++#include <string.h>
 +#include <math.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <sys/ioctl.h>
++#include <syslog.h>
 +#include "sensor_common.h"
 +#include "ot_mpi_isp.h"
 +#include "ot_mpi_ae.h"
 +#include "ot_mpi_awb.h"
++#include "ot_mipi_rx.h"
 +#include "imx662_cmos.h"
 +#include "imx662_cmos_param.h"
 +#include "imx662_cfg.h"
@@ -714,6 +253,7 @@ new file mode 100644
 +static td_void cmos_slow_framerate_set(ot_vi_pipe vi_pipe, td_u32 full_lines, ot_isp_ae_sensor_default *ae_sns_dft);
 +static td_void cmos_inttime_update(ot_vi_pipe vi_pipe, td_u32 int_time);
 +static td_void cmos_again_calc_table(ot_vi_pipe vi_pipe, td_u32 *pu32_again_lin, td_u32 *pu32_again_db);
++static td_void cmos_dgain_calc_table(ot_vi_pipe vi_pipe, td_u32 *dgain_lin, td_u32 *dgain_db);
 +static td_void cmos_gains_update(ot_vi_pipe vi_pipe, td_u32 pu32_again, td_u32 pu32_dgain);
 +static td_void cmos_init_sensor_exp_function(ot_isp_sns_exp_func *sensor_exp_func);
 +
@@ -727,7 +267,7 @@ new file mode 100644
 +        .fswdr_mode = OT_ISP_FSWDR_NORMAL_MODE,
 +        .quick_start_en = TD_FALSE,
 +        .fast_ae_en = TD_FALSE,
-+        .bus_info = { .i2c_dev = -1 },
++        .bus_info = { .i2c_dev = 0 },
 +        .sns_state = TD_NULL,
 +        .blc_clamp_info = TD_TRUE,
 +        .mode_tbl = {
@@ -745,7 +285,7 @@ new file mode 100644
 +            {
 +                IMX662_VMAX_DEFAULT,
 +                IMX662_FULL_LINES_MAX,
-+                IMX662_FPS_MAX,
++                IMX662_FPS_MAX_60,
 +                IMX662_FPS_MIN,
 +                IMX662_SENSOR_W,
 +                IMX662_SENSOR_H,
@@ -782,6 +322,8 @@ new file mode 100644
 +    isp_err_trace("Not support! Width:%u, Height:%u, Fps:%f, WDRMode:%d\n",
 +        (sns_image_mode)->width, (sns_image_mode)->height, (sns_image_mode)->fps, (sns_state)->wdr_mode);
 +}
++
++#define CB_TRACE() isp_err_trace("[TRACE] %s\n", __func__)
 +
 +static td_void cmos_get_inttime_max(ot_vi_pipe vi_pipe, td_u16 man_ratio_enable, td_u32 *ratio,
 +    ot_isp_ae_int_time_range *int_time, td_u32 *lf_max_int_time)
@@ -859,7 +401,7 @@ new file mode 100644
 +    exp_func->pfn_cmos_inttime_update     = cmos_inttime_update;
 +    exp_func->pfn_cmos_gains_update       = cmos_gains_update;
 +    exp_func->pfn_cmos_again_calc_table   = cmos_again_calc_table;
-+    exp_func->pfn_cmos_dgain_calc_table   = TD_NULL;
++    exp_func->pfn_cmos_dgain_calc_table   = cmos_dgain_calc_table;
 +    exp_func->pfn_cmos_get_inttime_max    = cmos_get_inttime_max;
 +    exp_func->pfn_cmos_ae_fswdr_attr_set  = cmos_ae_fswdr_attr_set;
 +    exp_func->pfn_cmos_ae_quick_start_status_set = cmos_ae_quick_start_status_set;
@@ -870,6 +412,7 @@ new file mode 100644
 +
 +static td_s32 cmos_awb_get_default(ot_vi_pipe vi_pipe, ot_isp_awb_sensor_default *awb_sns_dft)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1004,6 +547,7 @@ new file mode 100644
 +
 +static td_s32 cmos_get_ae_default(ot_vi_pipe vi_pipe, ot_isp_ae_sensor_default *ae_sns_dft)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1043,6 +587,7 @@ new file mode 100644
 +
 +static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_default *ae_sns_dft)
 +{
++    CB_TRACE();
 +    td_u32 vmax;
 +    td_float max_fps = IMX662_LINEAR_FRAMERATE;
 +    cis_info *cis = TD_NULL;
@@ -1078,6 +623,7 @@ new file mode 100644
 +
 +static td_void cmos_slow_framerate_set(ot_vi_pipe vi_pipe, td_u32 full_lines, ot_isp_ae_sensor_default *ae_sns_dft)
 +{
++    CB_TRACE();
 +    td_u32 vmax;
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
@@ -1117,6 +663,7 @@ new file mode 100644
 +
 +static td_void cmos_inttime_update(ot_vi_pipe vi_pipe, td_u32 int_time)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1134,6 +681,7 @@ new file mode 100644
 +
 +static td_void cmos_again_calc_table(ot_vi_pipe vi_pipe, td_u32 *pu32_again_lin, td_u32 *pu32_again_db)
 +{
++    CB_TRACE();
 +    ot_unused(vi_pipe);
 +    sns_check_pointer_void_return(pu32_again_lin);
 +    sns_check_pointer_void_return(pu32_again_db);
@@ -1143,8 +691,76 @@ new file mode 100644
 +    return;
 +}
 +
++/* IMX662 dgain: register value = linear gain (1024 = 1x). 256-entry lookup table. */
++#define IMX662_DGAIN_NODE_NUM              256
++#define IMX662_DGAIN_ADDR_INDEX_NODE_NUM   256
++
++static td_u32 dgain_index[IMX662_DGAIN_NODE_NUM] = {
++    1024, 1040, 1056, 1072, 1088, 1104, 1120, 1136, 1152, 1168, 1184, 1200, 1216, 1232, 1248, 1264,
++    1280, 1296, 1312, 1328, 1344, 1360, 1376, 1392, 1408, 1424, 1440, 1456, 1472, 1488, 1504, 1520,
++    1536, 1552, 1568, 1584, 1600, 1616, 1632, 1648, 1664, 1680, 1696, 1712, 1728, 1744, 1760, 1776,
++    1792, 1808, 1824, 1840, 1856, 1872, 1888, 1904, 1920, 1936, 1952, 1968, 1984, 2000, 2016, 2032,
++    2048, 2080, 2112, 2144, 2176, 2208, 2240, 2272, 2304, 2336, 2368, 2400, 2432, 2464, 2496, 2528,
++    2560, 2592, 2624, 2656, 2688, 2720, 2752, 2784, 2816, 2848, 2880, 2912, 2944, 2976, 3008, 3040,
++    3072, 3104, 3136, 3168, 3200, 3232, 3264, 3296, 3328, 3360, 3392, 3424, 3456, 3488, 3520, 3552,
++    3584, 3616, 3648, 3680, 3712, 3744, 3776, 3808, 3840, 3872, 3904, 3936, 3968, 4000, 4032, 4064,
++    4096, 4160, 4224, 4288, 4352, 4416, 4480, 4544, 4608, 4672, 4736, 4800, 4864, 4928, 4992, 5056,
++    5120, 5184, 5248, 5312, 5376, 5440, 5504, 5568, 5632, 5696, 5760, 5824, 5888, 5952, 6016, 6080,
++    6144, 6208, 6272, 6336, 6400, 6464, 6528, 6592, 6656, 6720, 6784, 6848, 6912, 6976, 7040, 7104,
++    7168, 7232, 7296, 7360, 7424, 7488, 7552, 7616, 7680, 7744, 7808, 7872, 7936, 8000, 8064, 8128,
++    8192, 8320, 8448, 8576, 8704, 8832, 8960, 9088, 9216, 9344, 9472, 9600, 9728, 9856, 9984, 10112,
++    10240, 10368, 10496, 10624, 10752, 10880, 11008, 11136, 11264, 11392, 11520, 11648, 11776, 11904, 12032, 12160,
++    12288, 12416, 12544, 12672, 12800, 12928, 13056, 13184, 13312, 13440, 13568, 13696, 13824, 13952, 14080, 14208,
++    14336, 14464, 14592, 14720, 14848, 14976, 15104, 15232, 15360, 15488, 15616, 15744, 15872, 16000, 16128, 16256
++};
++
++/* IMX662 dgain register = linear gain value directly (1024=1x) */
++static td_u32 dgain_table[IMX662_DGAIN_ADDR_INDEX_NODE_NUM] = {
++    1024, 1040, 1056, 1072, 1088, 1104, 1120, 1136, 1152, 1168, 1184, 1200, 1216, 1232, 1248, 1264,
++    1280, 1296, 1312, 1328, 1344, 1360, 1376, 1392, 1408, 1424, 1440, 1456, 1472, 1488, 1504, 1520,
++    1536, 1552, 1568, 1584, 1600, 1616, 1632, 1648, 1664, 1680, 1696, 1712, 1728, 1744, 1760, 1776,
++    1792, 1808, 1824, 1840, 1856, 1872, 1888, 1904, 1920, 1936, 1952, 1968, 1984, 2000, 2016, 2032,
++    2048, 2080, 2112, 2144, 2176, 2208, 2240, 2272, 2304, 2336, 2368, 2400, 2432, 2464, 2496, 2528,
++    2560, 2592, 2624, 2656, 2688, 2720, 2752, 2784, 2816, 2848, 2880, 2912, 2944, 2976, 3008, 3040,
++    3072, 3104, 3136, 3168, 3200, 3232, 3264, 3296, 3328, 3360, 3392, 3424, 3456, 3488, 3520, 3552,
++    3584, 3616, 3648, 3680, 3712, 3744, 3776, 3808, 3840, 3872, 3904, 3936, 3968, 4000, 4032, 4064,
++    4096, 4160, 4224, 4288, 4352, 4416, 4480, 4544, 4608, 4672, 4736, 4800, 4864, 4928, 4992, 5056,
++    5120, 5184, 5248, 5312, 5376, 5440, 5504, 5568, 5632, 5696, 5760, 5824, 5888, 5952, 6016, 6080,
++    6144, 6208, 6272, 6336, 6400, 6464, 6528, 6592, 6656, 6720, 6784, 6848, 6912, 6976, 7040, 7104,
++    7168, 7232, 7296, 7360, 7424, 7488, 7552, 7616, 7680, 7744, 7808, 7872, 7936, 8000, 8064, 8128,
++    8192, 8320, 8448, 8576, 8704, 8832, 8960, 9088, 9216, 9344, 9472, 9600, 9728, 9856, 9984, 10112,
++    10240, 10368, 10496, 10624, 10752, 10880, 11008, 11136, 11264, 11392, 11520, 11648, 11776, 11904, 12032, 12160,
++    12288, 12416, 12544, 12672, 12800, 12928, 13056, 13184, 13312, 13440, 13568, 13696, 13824, 13952, 14080, 14208,
++    14336, 14464, 14592, 14720, 14848, 14976, 15104, 15232, 15360, 15488, 15616, 15744, 15872, 16000, 16128, 16256
++};
++
++static td_void cmos_dgain_calc_table(ot_vi_pipe vi_pipe, td_u32 *dgain_lin, td_u32 *dgain_db)
++{
++    CB_TRACE();
++    int i;
++
++    sns_check_pointer_void_return(dgain_lin);
++    sns_check_pointer_void_return(dgain_db);
++
++    if (*dgain_lin >= dgain_index[IMX662_DGAIN_ADDR_INDEX_NODE_NUM - 1]) {
++        *dgain_lin = dgain_index[IMX662_DGAIN_ADDR_INDEX_NODE_NUM - 1];
++        *dgain_db = dgain_table[IMX662_DGAIN_NODE_NUM - 1];
++        return;
++    }
++
++    for (i = 1; i < IMX662_DGAIN_NODE_NUM; i++) {
++        if (*dgain_lin < dgain_index[i]) {
++            *dgain_lin = dgain_index[i - 1];
++            *dgain_db = dgain_table[i - 1];
++            break;
++        }
++    }
++    return;
++}
++
 +static td_void cmos_gains_update(ot_vi_pipe vi_pipe, td_u32 pu32_again, td_u32 pu32_dgain)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1156,8 +772,11 @@ new file mode 100644
 +    sns_state = cis->sns_state;
 +    sns_check_pointer_void_return(sns_state);
 +
-+    sns_state->regs_info[1].i2c_data[VALUE_IDX].data = 0x00;
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].data = (td_u8)(pu32_dgain & 0xFF);
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].data = (td_u8)((pu32_dgain >> 8) & 0xFF);
 +    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].data = (td_u8)(pu32_again & 0xFF);
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].data = (td_u8)((pu32_again >> 8) & 0xFF);
++    sns_state->regs_info[1].i2c_data[VALUE_IDX].data = 0x00;
 +    sns_state->regs_info[0].i2c_data[VALUE_IDX].data = 0x01;
 +
 +    return;
@@ -1165,6 +784,7 @@ new file mode 100644
 +
 +static td_s32 cmos_isp_get_default(ot_vi_pipe vi_pipe, ot_isp_cmos_default *isp_def)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1179,23 +799,73 @@ new file mode 100644
 +
 +    memset_s(isp_def, sizeof(ot_isp_cmos_default), 0, sizeof(ot_isp_cmos_default));
 +
-+    /* All tuning keys left 0: ISP uses built-in defaults for CLUT/DPC/WDR/LSC/ACS
-+     * and the linear pipeline (demosaic, sharpen, drc, bayer_nr, gamma, etc.).
-+     * Populate per-sensor tuning tables once measured. */
++    isp_def->key.bit1_dpc     = 1;
++    isp_def->dpc              = &g_cmos_dpc;
++
++    isp_def->key.bit1_wdr     = 0;
++
++    isp_def->key.bit1_lsc     = 0;
++
++    isp_def->key.bit1_acs     = 0;
++
++    isp_def->key.bit1_demosaic         = 1;
++    isp_def->demosaic                  = &g_cmos_demosaic;
++    isp_def->key.bit1_sharpen          = 1;
++    isp_def->sharpen                   = &g_cmos_yuv_sharpen;
++    isp_def->key.bit1_drc              = 1;
++    isp_def->drc                       = &g_cmos_drc;
++    isp_def->key.bit1_bayer_nr         = 1;
++    isp_def->bayer_nr                  = &g_cmos_bayer_nr;
++    isp_def->key.bit1_anti_false_color = 1;
++    isp_def->anti_false_color          = &g_cmos_anti_false_color;
++    isp_def->key.bit1_cac              = 1;
++    isp_def->cac                       = &g_cmos_cac;
++    isp_def->key.bit1_ldci             = 1;
++    isp_def->ldci                      = &g_cmos_ldci;
++    isp_def->key.bit1_gamma            = 1;
++    isp_def->gamma                     = &g_cmos_gamma;
++    isp_def->key.bit1_dehaze = 1;
++    isp_def->dehaze = &g_cmos_dehaze;
++    isp_def->key.bit1_ca = 1;
++    isp_def->ca = &g_cmos_ca;
++    (td_void)memcpy_s(&isp_def->noise_calibration, sizeof(ot_isp_noise_calibration),
++                      &g_cmos_noise_calibration, sizeof(ot_isp_noise_calibration));
++
++    (td_void)memcpy_s(&isp_def->dng_color_param, sizeof(ot_isp_dng_color_param),
++                      &g_cmos_dng_color_param, sizeof(ot_isp_dng_color_param));
 +
 +    isp_def->wdr_switch_attr.exp_ratio[0] = 0x40;
 +
 +    isp_def->sns_mode.sns_id = IMX662_ID;
 +    isp_def->sns_mode.sns_mode = sns_state->img_mode;
-+    isp_def->sns_mode.dng_raw_format.bits_per_sample = 10; /* 10bit output */
-+    isp_def->sns_mode.dng_raw_format.white_level = 1023;
-+    isp_def->sns_mode.valid_dng_raw_format = TD_FALSE;
++
++    /* DNG raw format initialization (required by ISP) */
++    isp_def->sns_mode.dng_raw_format.bits_per_sample = 12;
++    isp_def->sns_mode.dng_raw_format.white_level = 4095;
++    isp_def->sns_mode.dng_raw_format.default_scale.default_scale_hor.denominator = 1;
++    isp_def->sns_mode.dng_raw_format.default_scale.default_scale_hor.numerator = 1;
++    isp_def->sns_mode.dng_raw_format.default_scale.default_scale_ver.denominator = 1;
++    isp_def->sns_mode.dng_raw_format.default_scale.default_scale_ver.numerator = 1;
++    isp_def->sns_mode.dng_raw_format.cfa_repeat_pattern_dim.repeat_pattern_dim_row = 2;
++    isp_def->sns_mode.dng_raw_format.cfa_repeat_pattern_dim.repeat_pattern_dim_col = 2;
++    isp_def->sns_mode.dng_raw_format.black_level_repeat_dim.repeat_row = 2;
++    isp_def->sns_mode.dng_raw_format.black_level_repeat_dim.repeat_col = 2;
++    isp_def->sns_mode.dng_raw_format.cfa_layout = OT_ISP_CFALAYOUT_TYPE_RECTANGULAR;
++    isp_def->sns_mode.dng_raw_format.cfa_plane_color[0] = 0;
++    isp_def->sns_mode.dng_raw_format.cfa_plane_color[1] = 1;
++    isp_def->sns_mode.dng_raw_format.cfa_plane_color[2] = 2;
++    isp_def->sns_mode.dng_raw_format.cfa_pattern[0] = 0;
++    isp_def->sns_mode.dng_raw_format.cfa_pattern[1] = 1;
++    isp_def->sns_mode.dng_raw_format.cfa_pattern[2] = 1;
++    isp_def->sns_mode.dng_raw_format.cfa_pattern[3] = 2;
++    isp_def->sns_mode.valid_dng_raw_format = TD_TRUE;
 +
 +    return TD_SUCCESS;
 +}
 +
 +static td_s32 cmos_isp_get_black_level(ot_vi_pipe vi_pipe, ot_isp_cmos_black_level *black_level)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +    td_s32 i, j;
@@ -1208,10 +878,6 @@ new file mode 100644
 +
 +    sns_state = cis->sns_state;
 +    sns_check_pointer_return(sns_state);
-+
-+    if (sns_state->init == TD_FALSE) {
-+        return TD_FAILURE;
-+    }
 +
 +    (td_void)memcpy_s(black_level, sizeof(ot_isp_cmos_black_level), &g_cmos_blc, sizeof(ot_isp_cmos_black_level));
 +
@@ -1229,6 +895,7 @@ new file mode 100644
 +
 +static td_s32 cmos_isp_get_blc_clamp_info(ot_vi_pipe vi_pipe, td_bool *blc_clamp_en)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +
 +    sns_check_pipe_return(vi_pipe);
@@ -1244,6 +911,7 @@ new file mode 100644
 +
 +static td_s32 cmos_isp_set_wdr_mode(ot_vi_pipe vi_pipe, td_u8 mode)
 +{
++    CB_TRACE();
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
 +    sns_check_pipe_return(vi_pipe);
@@ -1312,21 +980,21 @@ new file mode 100644
 +    sns_state->regs_info[0].i2c_data[VMAX_REG_LSB_IDX].delay_frame_num = 0;
 +    sns_state->regs_info[0].i2c_data[VMAX_REG_LSB_IDX].reg_addr = 0x3028;
 +
-+    /* AGAIN L */
++    /* AGAIN L - IMX662 analog gain is at 0x306C */
 +    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].delay_frame_num = 0;
-+    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].reg_addr = 0x0900;
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_LSB_IDX].reg_addr = 0x306C;
 +
 +    /* AGAIN M */
 +    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].delay_frame_num = 0;
-+    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].reg_addr = 0x0901;
++    sns_state->regs_info[0].i2c_data[AGAIN_REG_MSB_IDX].reg_addr = 0x306D;
 +
-+    /* DGAIN L */
++    /* DGAIN L - IMX662 digital gain at 0x3070 */
 +    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].delay_frame_num = 0;
-+    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].reg_addr = 0x0910;
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_LSB_IDX].reg_addr = 0x3070;
 +
 +    /* DGAIN H */
 +    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].delay_frame_num = 0;
-+    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].reg_addr = 0x0911;
++    sns_state->regs_info[0].i2c_data[DGAIN_REG_MSB_IDX].reg_addr = 0x3071;
 +
 +    /* Group hold */
 +    sns_state->regs_info[0].i2c_data[VALUE_IDX].delay_frame_num = 0;
@@ -1353,6 +1021,7 @@ new file mode 100644
 +
 +static td_s32 cmos_isp_get_sns_regs_info(ot_vi_pipe vi_pipe, ot_isp_sns_regs_info *sns_regs_info)
 +{
++    CB_TRACE();
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +
@@ -1401,6 +1070,7 @@ new file mode 100644
 +
 +static td_s32 cmos_isp_set_image_mode(ot_vi_pipe vi_pipe, const ot_isp_cmos_sns_image_mode *sns_image_mode)
 +{
++    CB_TRACE();
 +    td_u32 i;
 +    td_u8 image_mode;
 +    cis_info *cis = TD_NULL;
@@ -1460,12 +1130,77 @@ new file mode 100644
 +
 +static td_void cmos_isp_set_pixel_detect(ot_vi_pipe vi_pipe, td_bool enable)
 +{
++    CB_TRACE();
 +    ot_unused(vi_pipe);
 +    ot_unused(enable);
 +}
 +
++static td_void imx662_preload_set_lane_mode(td_void)
++{
++    td_s32 fd;
++    lane_divide_mode_t lane_mode = LANE_DIVIDE_MODE_0;
++
++    /* majestic calls SET_DEV_ATTR before cmos_isp_init, which fails with
++     * "mipirx not set lane mode" because g_mipirx_init is FALSE.  Run
++     * SET_HS_MODE at dlopen time so the MIPI RX is ready before majestic
++     * configures the device attr. */
++    fd = open("/dev/ot_mipi_rx", O_RDWR);
++    if (fd < 0) {
++        isp_err_trace("imx662: open /dev/ot_mipi_rx failed (preload)\n");
++        return;
++    }
++    (td_void)ioctl(fd, OT_MIPI_SET_HS_MODE, &lane_mode);
++    close(fd);
++}
++
++__attribute__((constructor)) static td_void imx662_sns_ctor(td_void)
++{
++    imx662_preload_set_lane_mode();
++}
++
++static td_void imx662_enable_mclk(td_void)
++{
++    td_s32 fd;
++    td_s32 ret;
++    lane_divide_mode_t lane_mode = LANE_DIVIDE_MODE_0;
++    sns_clk_source_t clk_source = 0;
++    sns_rst_source_t rst_source = 0;
++
++    fd = open("/dev/ot_mipi_rx", O_RDWR);
++    if (fd < 0) {
++        isp_err_trace("imx662: open /dev/ot_mipi_rx failed\n");
++        return;
++    }
++
++    ret = ioctl(fd, OT_MIPI_SET_HS_MODE, &lane_mode);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662: SET_HS_MODE failed: %d\n", ret);
++    }
++
++    ret = ioctl(fd, OT_MIPI_ENABLE_SENSOR_CLOCK, &clk_source);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662: ENABLE_SENSOR_CLOCK failed: %d\n", ret);
++    }
++
++    /* Sensor reset sequence: reset → 10ms → unreset → 100ms PLL lock */
++    ret = ioctl(fd, OT_MIPI_RESET_SENSOR, &rst_source);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662: RESET_SENSOR failed: %d\n", ret);
++    }
++    usleep(10000);
++
++    ret = ioctl(fd, OT_MIPI_UNRESET_SENSOR, &rst_source);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662: UNRESET_SENSOR failed: %d\n", ret);
++    }
++    usleep(100000);
++
++    close(fd);
++}
++
 +static td_void cmos_isp_init(ot_vi_pipe vi_pipe)
 +{
++    CB_TRACE();
 +    td_s32 ret;
 +    cis_info *cis = TD_NULL;
 +    ot_isp_sns_state *sensor_state = TD_NULL;
@@ -1482,25 +1217,27 @@ new file mode 100644
 +    cis->i2c.addr_byte_num = IMX662_ADDR_BYTE;
 +    cis->i2c.data_byte_num = IMX662_DATA_BYTE;
 +
++    isp_err_trace("imx662: cmos_isp_init i2c_dev=%d\n", cis->bus_info.i2c_dev);
++
++    imx662_enable_mclk();
++
 +    ret = cis_i2c_init(cis);
 +    if (ret != TD_SUCCESS) {
-+        isp_err_trace("i2c init failed!\n");
++        isp_err_trace("imx662: i2c init FAILED ret=0x%x\n", ret);
 +        return;
 +    }
 +
-+    /* Write global init sequence (standby entry, PLL, MIPI config) */
 +    ret = imx662_reg_init(cis, g_imx662_init_seq, IMX662_INIT_SEQ_LEN);
 +    if (ret != TD_SUCCESS) {
-+        isp_err_trace("imx662 global init failed!\n");
++        isp_err_trace("imx662: global init FAILED ret=0x%x\n", ret);
 +        return;
 +    }
 +
-+    /* Configure mode-specific registers */
 +    ret = imx662_linear_init(cis, IMX662_VMAX_DEFAULT, IMX662_HMAX_1080P_30FPS,
-+        IMX662_LANEMODE_1LANE, IMX662_DATARATE_1782,
++        IMX662_LANEMODE_1LANE, IMX662_DATARATE_891,
 +        IMX662_ADBIT_12BIT, IMX662_MDBIT_12BIT);
 +    if (ret != TD_SUCCESS) {
-+        isp_err_trace("imx662 mode init failed!\n");
++        isp_err_trace("imx662: mode init FAILED ret=0x%x\n", ret);
 +        return;
 +    }
 +
@@ -1511,6 +1248,7 @@ new file mode 100644
 +
 +static td_void cmos_isp_exit(ot_vi_pipe vi_pipe)
 +{
++    CB_TRACE();
 +    td_s32 ret;
 +    cis_info *cis = TD_NULL;
 +
@@ -1529,6 +1267,7 @@ new file mode 100644
 +
 +static td_void cmos_isp_global_init(ot_vi_pipe vi_pipe)
 +{
++    CB_TRACE();
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +    cis_info *cis = TD_NULL;
 +
@@ -1559,6 +1298,8 @@ new file mode 100644
 +    td_s32 ret;
 +    cis_register reg = {0};
 +    cis_info *cis = TD_NULL;
++
++    isp_err_trace("imx662: register_callback pipe=%d\n", vi_pipe);
 +
 +    sns_check_pipe_return(vi_pipe);
 +    sns_check_pointer_return(ae_lib);
@@ -1633,7 +1374,7 @@ new file mode 100644
 +    ot_isp_sns_state *sns_state = TD_NULL;
 +    td_u32 vmax, hmax;
 +    td_u8 lane_mode = IMX662_LANEMODE_1LANE;
-+    td_u8 datarate = IMX662_DATARATE_1782;
++    td_u8 datarate = IMX662_DATARATE_891;
 +
 +    sns_check_pipe_void_return(vi_pipe);
 +
@@ -1684,6 +1425,7 @@ new file mode 100644
 +    sns_check_pointer_return(cis);
 +
 +    cis->bus_info.i2c_dev = sns_bus_info.i2c_dev;
++    isp_err_trace("imx662: set_bus_info i2c_dev=%d\n", sns_bus_info.i2c_dev);
 +
 +    return TD_SUCCESS;
 +}
@@ -1698,6 +1440,7 @@ new file mode 100644
 +    cis = cmos_get_info(vi_pipe);
 +    sns_check_pointer_return(cis);
 +
++    isp_err_trace("imx662: set_init pipe=%d exposure=%d\n", vi_pipe, init_attr->exposure);
 +    cis_init_attr(cis, init_attr);
 +
 +    return TD_SUCCESS;
@@ -1751,3 +1494,1803 @@ new file mode 100644
 +{
 +    return &g_sns_imx662_obj;
 +}
++
++ot_isp_sns_obj *sensor_driver(const char *sensor_name)
++{
++    if (sensor_name == TD_NULL || sensor_name[0] == '\0' ||
++        strstr(sensor_name, "imx662") != TD_NULL) {
++        return &g_sns_imx662_obj;
++    }
++    return TD_NULL;
++}
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
+new file mode 100644
+index 0000000..16b44f4
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos.h
+@@ -0,0 +1,139 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_CMOS_H_
++#define IMX662_CMOS_H_
++
++#include "ot_common_isp.h"
++#include "ot_sns_ctrl.h"
++#include "securec.h"
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++/* sensor ID & resolution */
++#define IMX662_ID               662
++#define IMX662_WIDTH            1920
++#define IMX662_HEIGHT           1080
++#define IMX662_SENSOR_W         1920
++#define IMX662_SENSOR_H         1080
++
++/* vmax (fixed 1250 for all-pixel modes), hmax per mode */
++#define IMX662_VMAX_DEFAULT     1250
++#define IMX662_HMAX_1080P_30FPS 1980
++
++/* register bits */
++#define IMX662_STANDBY_ENTER    0x01
++#define IMX662_STANDBY_EXIT     0x00
++#define IMX662_WINMODE_ALLPIXEL 0x00
++#define IMX662_WINMODE_HD1080   0x04
++#define IMX662_ADBIT_10BIT      0x00
++#define IMX662_ADBIT_12BIT      0x01
++#define IMX662_MDBIT_10BIT      0x00
++#define IMX662_MDBIT_12BIT      0x01
++#define IMX662_DATARATE_720     0x06
++#define IMX662_DATARATE_891     0x05
++#define IMX662_DATARATE_1782    0x02
++#define IMX662_LANEMODE_1LANE   0x00
++#define IMX662_LANEMODE_4LANE   0x03
++#define IMX662_REG_MIRROR_FLIP  0x3030
++#define IMX662_MIRROR_NORMAL    0x00
++
++/* i2c bus config */
++#define IMX662_I2C_ADDR         0x34
++#define IMX662_ADDR_BYTE        2
++#define IMX662_DATA_BYTE        1
++
++/* frame lines */
++#define IMX662_FULL_LINES_MAX   0xFFFF
++#define IMX662_INCREASE_LINES   1
++#define IMX662_VMAX_VAL         1250
++#define IMX662_VMAX             (IMX662_VMAX_VAL + IMX662_INCREASE_LINES)
++#define IMX662_FPS_MAX          30.0f
++#define IMX662_FPS_MAX_60       60.0f
++#define IMX662_FPS_MIN          1.0f
++#define IMX662_MODE_LINEAR      0
++
++/* ae configs */
++#define IMX662_AGAIN_MIN        1024
++#define IMX662_AGAIN_MAX        32768
++#define IMX662_DGAIN_MIN        1024
++#define IMX662_DGAIN_MAX        16384
++
++#define ISP_DGAIN_SHIFT         8
++#define ISP_DGAIN_TARGET_MIN    1
++#define ISP_DGAIN_TARGET_MAX    128
++#define INT_TIME_ACCURACY       1
++#define AGAIN_ACCURACY          1
++#define DGAIN_ACCURACY          0.015625
++
++#define FL_OFFSET_LINEAR        4
++
++/* awb calibrate configs (placeholders until tuned) */
++#define CALIBRATE_STATIC_TEMP       5000
++#define CALIBRATE_STATIC_WB_R_GAIN  256
++#define CALIBRATE_STATIC_WB_GR_GAIN 256
++#define CALIBRATE_STATIC_WB_GB_GAIN 256
++#define CALIBRATE_STATIC_WB_B_GAIN  256
++
++#define CALIBRATE_AWB_P1 0
++#define CALIBRATE_AWB_P2 256
++#define CALIBRATE_AWB_Q1 0
++#define CALIBRATE_AWB_A1 11800
++#define CALIBRATE_AWB_B1 10240
++#define CALIBRATE_AWB_C1 0
++
++#define GOLDEN_RGAIN             0
++#define GOLDEN_BGAIN             0
++
++/* other configs */
++#define STANDARD_FPS             30
++#define FLICKER_FREQ             (50 * 256)
++#define INIT_EXP_DEFAULT         4000
++#define MAX_INT_TIME_TARGET      65535
++#define AE_COMENSATION_DEFAULT   0x40
++
++/* black level */
++#define BLACK_LEVEL_DEFAULT      0x100
++
++/* assist macros */
++#define higher_4bits(x) (((x) & 0xf0000) >> 16)
++#define high_8bits(x)   (((x) & 0xff00) >> 8)
++#define low_8bits(x)    ((x) & 0x00ff)
++
++/* sensor modes */
++typedef enum {
++    IMX662_1080P_30FPS_12BIT_1LANE_MODE = 0,
++    IMX662_1080P_60FPS_12BIT_1LANE_MODE,
++    IMX662_MODE_MAX
++} imx662_res_mode;
++
++/* register array index for per-frame updates */
++typedef enum {
++    PAGE_IDX = 0,
++    EXP_REG_MSB_IDX,
++    EXP_REG_MID_IDX,
++    EXP_REG_LSB_IDX,
++    VMAX_REG_MSB_IDX,
++    VMAX_REG_MID_IDX,
++    VMAX_REG_LSB_IDX,
++    AGAIN_REG_LSB_IDX,
++    AGAIN_REG_MSB_IDX,
++    DGAIN_REG_LSB_IDX,
++    DGAIN_REG_MSB_IDX,
++    VALUE_IDX,
++    REG_MAX_IDX
++} imx662_linear_reg_index;
++
++ot_isp_sns_obj *imx662_get_obj(td_void);
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif /* End of #ifdef __cplusplus */
++#endif /* IMX662_CMOS_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
+new file mode 100644
+index 0000000..bda62c1
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_cmos_param.h
+@@ -0,0 +1,1318 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_CMOS_PARAM_H_
++#define IMX662_CMOS_PARAM_H_
++
++static const ot_isp_dp_dynamic_attr g_cmos_dpc = {
++    1,              /* dynamic correction enable */
++
++    {
++        {
++            0,          /* twinkle suppression enable */
++            6,          /* twinkle suppression threshold */
++            21,         /* twinkle suppression slop */
++            0,          /* 0, auto mode; 1, manual mode */
++            {
++                0,      /* manual mode strength */
++                0,      /* manual mode blend ratio */
++            },
++            {
++                { 0, 0, 0, 152, 220, 220, 220, 220, 220, 220, 152, 152, 152, 152, 152, 152 }, /* strength[16] */
++                { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 50, 50, 50, 50, 50 },                     /* blend_ratio[16] */
++            },
++            96,         /* strength for bright area */
++            63,         /* strength for dark area */
++        }, /* dynamic config for linear frame */
++	}
++};
++
++static const ot_isp_cr_attr g_cmos_ge = {
++    1,   /* en */
++    9,   /* slope */
++    9,   /* sensi_slope */
++    300, /* sensi_threshold */
++    { 128, 128, 128, 128, 129, 129, 129, 129, 130, 130, 130, 130, 131, 131, 131, 131 }, /* strength */
++    { 300, 300, 300, 300, 310, 310, 310, 310, 320, 320, 320, 320, 330, 330, 330, 330 }, /* threshold */
++    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, /* filter_mode */
++    { 1024, 1024, 1024, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048 } /* np_offset */
++};
++
++static const ot_isp_demosaic_attr g_cmos_demosaic = {
++    1, /* en */
++    OT_OP_MODE_AUTO, /* op_type */
++    128, /* aidm_blend_ratio */
++    {
++        48, /* nddm_strength */
++        64, /* nddm_mf_detail_strength */
++        { 0 }, /* hf_detail_strength */
++        2, /* detail_smooth_range */
++        0, /* color_noise_f_threshold */
++        8, /* color_noise_f_strength */
++        1, /* color_noise_y_threshold */
++        10, /* color_noise_y_strength */
++    },
++    {
++        /* nddm_strength */
++        { 48, 48, 48, 54, 54, 54, 48, 40, 40, 48, 48, 48, 48, 48, 48, 48 },
++        /* nddm_mf_detail_strength */
++        { 82, 74, 68, 60, 54, 50, 44, 40, 40, 40, 40, 32, 16, 16, 16, 16 },
++        /* hf_detail_strength */
++        {
++            { 0, 0, 1, 2, 4, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 },
++        },
++        /* detail_smooth_range */
++        { 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 7, 7, 7, 7 },
++        /* color_noise_f_threshold */
++        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
++        /* color_noise_f_strength */
++        { 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 },
++        /* color_noise_y_threshold */
++        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
++        /* color_noise_y_strength */
++        { 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 },
++    }
++};
++
++static const ot_isp_anti_false_color_attr g_cmos_anti_false_color = {
++    1,                  /* en */
++    OT_OP_MODE_AUTO,    /* op_type */
++    { 8, 8 },           /* manual_attr */
++    {
++        { 10, 10, 8, 8, 7, 7, 7, 6, 6, 6, 5, 4, 3, 2, 1, 0 }, /* anti_false_color_threshold */
++        {  4,  6, 8, 8, 7, 7, 7, 6, 6, 6, 5, 4, 3, 2, 1, 0 }, /* anti_false_color_strength */
++    }
++};
++
++static const ot_isp_cac_attr g_cmos_cac = {
++    1, /* en */
++    OT_OP_MODE_AUTO, /* op_type */
++    1, /* detect_mode */
++    35, /* purple_upper_limit */
++    (-15), /* purple_lower_limit */
++    /* acac_cfg */
++    {
++        {
++            {10, 300}, /* edge_threshold */
++            16, /* edge_gain */
++            3, /* cac_rb_strength */
++            63, /* purple_alpha */
++            63, /* edge_alpha */
++            25, /* satu_low_threshold */
++            16383, /* satu_high_threshold */
++        },
++        {
++            /* edge_threshold */
++            {
++                {100, 100, 100, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150},
++                {500, 500, 500, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600, 600}
++            },
++            /* edge_gain */
++            { 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16 },
++            /* cac_rb_strength */
++            { 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3 },
++            /* purple_alpha */
++            { 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63 },
++            /* edge_alpha */
++            { 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63 },
++            /* satu_low_threshold */
++            { 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25 },
++            /* satu_high_threshold */
++            { 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383, 16383,
++              16383, 16383 },
++        }
++    },
++    /* lcac_cfg */
++    {
++        60, /* purple_detect_range */
++        200, /* var_threshold */
++        { 1500, 1500, 0 }, /* r_detect_threshold */
++        { 1500, 1500, 0 }, /* g_detect_threshold */
++        { 4095, 1500, 0 }, /* b_detect_threshold */
++        {
++            0, /* de_purple_cr_strength */
++            3, /* de_purple_cb_strength */
++        },
++        {
++            /* de_purple_cr_strength */
++            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
++            /* de_purple_cb_strength */
++            { 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3 },
++        }
++    }
++};
++
++static ot_isp_noise_calibration g_cmos_noise_calibration = {
++    {
++        1600.0000000000, 0.0003845635, 0.0000036573, 0.0000000790, -0.0000000060, 0.0000095863,
++        0.0004284470, 0.0022673796, 0.0000000666, 0.0000066933, 0.0056224121, 0, 0, 0, 0, 0
++    }
++};
++
++static const ot_isp_nr_attr g_cmos_bayer_nr = {
++    1,      /* bEnable */
++    OT_OP_MODE_AUTO,      /* enOpType */
++    {
++        1,      /* md_enable */
++    },
++    0,      /* lsc_nr_enable */
++    0,      /* lsc_ratio1 */
++    {
++        85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85, 85,
++        85, 85, 85, 85, 85, 85, 90, 90, 90, 95, 95, 95, 100, 100, 100, 100, 100
++    },   /* CoringRatio */
++    {
++        128, 128, 128, 128, 128, 128, 110, 90,
++        77, 77, 77, 77, 77, 77, 77, 77,    // u1.7 x 32  (128 = 1.0f)  mix_gain
++        77, 77, 77, 77, 77, 77, 77, 77,
++        77, 77, 77, 77, 77, 77, 77, 77
++    },
++    OT_ISP_MD_MODE,      /* ref_mode */
++    0,      /* load_ref_enable */
++    /* snr_cfg */
++    {
++        0, /* snr_version */
++        {
++            {
++                /* snr auto */
++                {
++                    {
++                        {108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108},
++                        {108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108},
++                        {108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108},
++                        {108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108, 108}
++                    },
++                    {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, /* sfm0_detail_prot */
++                    {512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512, 512}, /* sfm1_str */
++                    {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}, /* sfm1_adp_strength */
++                    {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64}, /* sfm6_strength */
++                    {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64}, /* sfm7_strength */
++                    {100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100}, /* sth */
++                    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, /* tss */
++                    {128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128}, /* fine_str */
++                    {50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50}, /* coring_wgt */
++                    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, /* coring_mot_ratio */
++                    {   /* noisesd_lut */
++                        {2, 2, 3, 3, 4, 6, 7, 15, 29, 59, 117, 234, 255, 255, 255, 255},
++                        {2, 2, 3, 3, 4, 6, 7, 15, 29, 59, 117, 234, 255, 255, 255, 255},
++                        {2, 2, 3, 3, 4, 6, 7, 15, 29, 59, 117, 234, 255, 255, 255, 255},
++                        {3, 4, 6, 8, 11, 15, 21, 32, 50, 82, 142, 255, 255, 255, 255, 255},
++                        {4, 6, 8, 11, 15, 21, 30, 43, 65, 100, 164, 255, 255, 255, 255, 255},
++                        {5, 7, 9, 13, 18, 26, 36, 52, 76, 116, 183, 255, 255, 255, 255, 255},
++                        {6, 8, 11, 15, 21, 29, 41, 60, 87, 129, 201, 255, 255, 255, 255, 255},
++                        {7, 9, 12, 17, 23, 33, 46, 66, 96, 142, 217, 255, 255, 255, 255, 255},
++                        {7, 10, 13, 18, 26, 36, 50, 72, 104, 153, 232, 255, 255, 255, 255, 255},
++                        {8, 10, 14, 20, 28, 39, 54, 78, 112, 164, 246, 255, 255, 255, 255, 255},
++                        {8, 11, 15, 21, 29, 41, 58, 83, 119, 174, 255, 255, 255, 255, 255, 255},
++                        {9, 12, 16, 22, 31, 44, 62, 88, 126, 183, 255, 255, 255, 255, 255, 255},
++                        {9, 12, 17, 23, 33, 46, 65, 93, 133, 192, 255, 255, 255, 255, 255, 255},
++                        {10, 13, 18, 25, 34, 48, 68, 97, 139, 201, 255, 255, 255, 255, 255, 255},
++                        {10, 14, 19, 26, 36, 50, 71, 101, 145, 209, 255, 255, 255, 255, 255, 255},
++                        {11, 14, 19, 27, 37, 53, 74, 105, 150, 217, 255, 255, 255, 255, 255, 255},
++                        {11, 15, 20, 28, 39, 54, 77, 109, 156, 224, 255, 255, 255, 255, 255, 255},
++                        {11, 15, 21, 29, 40, 56, 79, 113, 161, 232, 255, 255, 255, 255, 255, 255},
++                        {12, 16, 21, 30, 41, 58, 82, 117, 166, 239, 255, 255, 255, 255, 255, 255},
++                        {12, 16, 22, 30, 43, 60, 85, 120, 171, 246, 255, 255, 255, 255, 255, 255},
++                        {13, 17, 23, 31, 44, 62, 87, 124, 176, 252, 255, 255, 255, 255, 255, 255},
++                        {13, 17, 23, 32, 45, 63, 89, 127, 181, 255, 255, 255, 255, 255, 255, 255},
++                        {13, 17, 24, 33, 46, 65, 92, 130, 185, 255, 255, 255, 255, 255, 255, 255},
++                        {14, 18, 24, 34, 47, 67, 94, 133, 190, 255, 255, 255, 255, 255, 255, 255},
++                        {14, 18, 25, 35, 48, 68, 96, 137, 194, 255, 255, 255, 255, 255, 255, 255},
++                        {14, 19, 26, 35, 50, 70, 98, 140, 198, 255, 255, 255, 255, 255, 255, 255},
++                        {14, 19, 26, 36, 51, 71, 100, 143, 203, 255, 255, 255, 255, 255, 255, 255},
++                        {15, 19, 27, 37, 52, 73, 102, 146, 207, 255, 255, 255, 255, 255, 255, 255},
++                        {15, 20, 27, 38, 53, 74, 104, 148, 211, 255, 255, 255, 255, 255, 255, 255},
++                        {15, 20, 28, 38, 54, 75, 106, 151, 215, 255, 255, 255, 255, 255, 255, 255},
++                        {16, 21, 28, 39, 55, 77, 108, 154, 219, 255, 255, 255, 255, 255, 255, 255},
++                        {16, 21, 29, 40, 56, 78, 110, 157, 222, 255, 255, 255, 255, 255, 255, 255}
++                    },
++                },
++
++                /* snr manual */
++                {
++                    { 108, 108, 108, 108 }, /* snr_sfm0_coarstr */
++                    16, /* sfm0_detail_prot */
++                    512, /* sfm1_str */
++                    2, /* sfm1_adp_strength */
++                    64, /* sfm6_strength */
++                    64, /* sfm7_strength */
++                    100, /* sth */
++                    0, /* tss */
++                    128, /* fine_str */
++                    50, /* coring_wgt */
++                    0,  /* coring_mot_ratio */
++                    {
++                        7, 7, 7, 21, 29, 35, 40, 45, 49, 53, 56, 60, 63, 66, 69, 72,
++                        74, 77, 79, 82, 84, 87, 89, 91, 93, 95, 97, 99, 101, 103, 105, 107
++                    },  /* noisesd_lut */
++                },
++            },
++        },
++    },
++    /* md_cfg */
++    {
++        .md_cfg = {
++            /* md auto */
++            {
++                {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}, /* md_mode */
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}, /* md_size_ratio */
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}, /* md_anti_flicker_str */
++                {26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26},   /* md_static_ratio */
++                {13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13},   /* md_motion_ratio */
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},   /* md_static_finestr */
++                {255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}, /* tnr_tfs */
++                {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, /* user_define_md */
++                {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, /* user_define_slope */
++                {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90}, /* user_define_dark_thresh */
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, /* user_define_color_thresh */
++                {26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26}, /* sfr_r */
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}, /* sfr_g */
++                {26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26}  /* sfr_b */
++            },
++
++            /* md_manual */
++            {
++                2, /* md_mode */
++                32, /* md_size_ratio */
++                32, /* md_anti_flicker_str */
++                26, /* md_static_ratio */
++                13, /* md_motion_ratio */
++                32, /* md_static_finestr */
++                255, /* tnr_tfs */
++                0, /* user_define_md */
++                0, /* user_define_bright_thresh */
++                90, /* user_define_dark_thresh */
++                16, /* user_define_color_thresh */
++                26, /* sfr_r */
++                32, /* sfr_g */
++                26  /* sfr_b */
++            },
++        },
++    },
++    /* wdr_cfg */
++    {
++        {16, 16, 16, 16}, /* sfm0_wdr_frame_str */
++        {16, 16, 16, 16}, /* sfm0_fusion_frame_str */
++        {64, 16, 16, 16}, /* snr_wdr_sfm6_strength */
++        {64, 16, 16, 16}, /* snr_wdr_sfm7_strength */
++        {64, 16, 16, 16}, /* snr_fusion_sfm6_strength */
++        {64, 16, 16, 16}, /* snr_fusion_sfm7_strength */
++        {16, 16, 16, 16}, /* md_wdr_frame_str */
++        {16, 16, 16, 16}, /* md_fusion_frame_str */
++    },
++    /* dering_cfg */
++    {
++        {
++            {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64}, /* dering_strength */
++            {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64}, /* dering_thresh */
++            {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, /* dering_static_str */
++            {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}, /* dering_motion_str */
++        },
++        {
++            64, /* dering_strength */
++            64, /* dering_thresh */
++            16, /* dering_static_str */
++            16, /* dering_motion_str */
++        },
++    },
++};
++
++static const ot_isp_ldci_attr g_cmos_ldci = {
++    /* enable */
++    1,
++    /* gauss_lpf_sigma */
++    36,
++    /* ot_op_mode */
++    0,
++
++    /* ot_isp_ldci_manual_attr */
++    {
++        /* ot_isp_ldci_he_wgt_attr */
++        {
++            /* he_pos_wgt */
++            {
++                50, 80, 32
++            },
++            /* he_neg_wgt */
++            {
++                60, 80, 128
++            }
++        },
++
++        /* blc_ctrl */
++        20
++    },
++
++    /* ot_isp_ldci_auto_attr */
++    {
++        /* he_wgt[OT_ISP_AUTO_ISO_NUM] */
++        {
++            {{48, 80, 32}, {60, 80, 128}},
++            {{45, 80, 16}, {45, 80, 128}},
++            {{42, 70, 0}, {45, 80, 128}},
++            {{40, 70, 0}, {45, 80, 0}},
++            {{35, 70, 0}, {45, 80, 0}},
++            {{32, 64, 0}, {24, 72, 0}},
++            {{12, 24, 0}, {12, 64, 0}},
++            {{8, 20, 0}, {8, 54, 0}},
++            {{6, 12, 0}, {6, 36, 0}},
++            {{0, 8, 0}, {0, 8, 0}},
++            {{0, 6, 0}, {0, 6, 0}},
++            {{0, 2, 0}, {0, 2, 0}},
++            {{0, 1, 0}, {0, 1, 0}},
++            {{0, 1, 0}, {0, 1, 0}},
++            {{0, 1, 0}, {0, 1, 0}},
++            {{0, 1, 0}, {0, 1, 0}}
++        },
++
++        /* blc_ctrl */
++        { 20, 20, 20, 20, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30 }
++    },
++
++    /* tpr_incr_coef */
++    8,
++    /* tpr_decr_coef */
++    8
++};
++
++static const ot_isp_gamma_attr g_cmos_gamma = {
++    1,
++    {
++        0,   13,   27,   40,   54,   68,   81,   95,  108,  121,  135,  150,  166,  180,  195,  210,  226,  242,
++        259,  269,  281,  292,  303,  315,  327,  339,  352,  364,  376,  389,  402,  415,  425,  435,  446,  456,
++        467,  477,  488,  499,  510,  521,  532,  543,  555,  566,  578,  591,  602,  613,  625,  636,  648,  659,
++        671,  683,  695,  708,  721,  734,  748,  762,  777,  792,  809,  817,  826,  836,  845,  855,  865,  875,
++        885,  896,  906,  917,  928,  939,  950,  961,  972,  983,  994, 1005, 1017, 1028, 1039, 1051, 1062, 1073,
++        1085, 1096, 1107, 1118, 1129, 1140, 1151, 1161, 1172, 1182, 1193, 1203, 1213, 1223, 1234, 1244, 1254, 1264,
++        1274, 1284, 1295, 1305, 1315, 1325, 1336, 1346, 1357, 1367, 1378, 1389, 1400, 1411, 1422, 1433, 1445, 1456,
++        1468, 1480, 1493, 1499, 1505, 1511, 1518, 1524, 1531, 1537, 1544, 1551, 1558, 1564, 1571, 1578, 1585, 1592,
++        1599, 1607, 1614, 1621, 1628, 1635, 1643, 1650, 1657, 1665, 1672, 1679, 1687, 1694, 1702, 1709, 1716, 1724,
++        1731, 1738, 1746, 1753, 1761, 1768, 1775, 1783, 1790, 1797, 1804, 1811, 1819, 1826, 1833, 1840, 1847, 1854,
++        1861, 1867, 1874, 1881, 1888, 1894, 1901, 1907, 1914, 1920, 1926, 1932, 1939, 1945, 1951, 1956, 1962, 1968,
++        1974, 1980, 1986, 1991, 1997, 2003, 2008, 2014, 2020, 2025, 2031, 2036, 2042, 2047, 2052, 2058, 2063, 2068,
++        2074, 2079, 2084, 2089, 2094, 2099, 2105, 2110, 2115, 2120, 2125, 2130, 2135, 2140, 2145, 2150, 2154, 2159,
++        2164, 2169, 2174, 2179, 2183, 2188, 2193, 2198, 2202, 2207, 2212, 2217, 2221, 2226, 2231, 2235, 2240, 2244,
++        2249, 2254, 2258, 2263, 2268, 2272, 2277, 2281, 2286, 2290, 2295, 2299, 2304, 2308, 2312, 2317, 2321, 2325,
++        2330, 2334, 2338, 2342, 2347, 2351, 2355, 2359, 2363, 2368, 2372, 2376, 2380, 2384, 2388, 2392, 2396, 2400,
++        2404, 2408, 2412, 2416, 2420, 2424, 2428, 2432, 2436, 2439, 2443, 2447, 2451, 2455, 2459, 2463, 2466, 2470,
++        2474, 2478, 2482, 2485, 2489, 2493, 2497, 2500, 2504, 2508, 2512, 2515, 2519, 2523, 2527, 2530, 2534, 2538,
++        2541, 2545, 2548, 2552, 2556, 2559, 2563, 2566, 2570, 2574, 2577, 2581, 2584, 2588, 2591, 2594, 2598, 2601,
++        2605, 2608, 2612, 2615, 2618, 2622, 2625, 2629, 2632, 2635, 2639, 2642, 2645, 2649, 2652, 2655, 2659, 2662,
++        2665, 2668, 2672, 2675, 2678, 2681, 2685, 2688, 2691, 2694, 2698, 2701, 2704, 2707, 2710, 2714, 2717, 2720,
++        2723, 2727, 2730, 2733, 2736, 2739, 2743, 2746, 2749, 2752, 2755, 2758, 2762, 2765, 2768, 2771, 2774, 2777,
++        2781, 2784, 2787, 2790, 2793, 2796, 2800, 2803, 2806, 2809, 2812, 2815, 2818, 2821, 2824, 2827, 2831, 2834,
++        2837, 2840, 2843, 2846, 2849, 2852, 2855, 2858, 2861, 2864, 2867, 2870, 2873, 2876, 2879, 2882, 2885, 2887,
++        2890, 2893, 2896, 2899, 2902, 2905, 2908, 2910, 2913, 2916, 2919, 2922, 2924, 2927, 2930, 2933, 2936, 2938,
++        2941, 2944, 2946, 2949, 2952, 2954, 2957, 2960, 2962, 2965, 2967, 2970, 2972, 2975, 2978, 2980, 2983, 2985,
++        2988, 2990, 2993, 2995, 2998, 3000, 3002, 3005, 3007, 3010, 3012, 3015, 3017, 3019, 3022, 3024, 3026, 3029,
++        3031, 3034, 3036, 3038, 3041, 3043, 3045, 3048, 3050, 3052, 3055, 3057, 3059, 3062, 3064, 3066, 3069, 3071,
++        3073, 3075, 3078, 3080, 3082, 3085, 3087, 3089, 3092, 3094, 3096, 3098, 3101, 3103, 3105, 3107, 3110, 3112,
++        3114, 3116, 3119, 3121, 3123, 3125, 3128, 3130, 3132, 3134, 3136, 3139, 3141, 3143, 3145, 3147, 3149, 3152,
++        3154, 3156, 3158, 3160, 3162, 3165, 3167, 3169, 3171, 3173, 3175, 3177, 3179, 3182, 3184, 3186, 3188, 3190,
++        3192, 3194, 3196, 3198, 3201, 3203, 3205, 3207, 3209, 3211, 3213, 3215, 3217, 3219, 3221, 3223, 3225, 3227,
++        3230, 3232, 3234, 3236, 3238, 3240, 3242, 3244, 3246, 3248, 3250, 3252, 3254, 3256, 3258, 3260, 3262, 3264,
++        3266, 3268, 3270, 3272, 3274, 3276, 3278, 3280, 3282, 3283, 3285, 3287, 3289, 3291, 3293, 3295, 3297, 3299,
++        3301, 3303, 3305, 3307, 3309, 3311, 3312, 3314, 3316, 3318, 3320, 3322, 3324, 3326, 3328, 3330, 3332, 3334,
++        3335, 3337, 3339, 3341, 3343, 3345, 3347, 3349, 3351, 3353, 3355, 3356, 3358, 3360, 3362, 3364, 3366, 3368,
++        3370, 3371, 3373, 3375, 3377, 3379, 3381, 3382, 3384, 3386, 3388, 3390, 3392, 3393, 3395, 3397, 3399, 3401,
++        3403, 3404, 3406, 3408, 3410, 3412, 3413, 3415, 3417, 3419, 3421, 3423, 3424, 3426, 3428, 3430, 3432, 3434,
++        3435, 3437, 3439, 3441, 3443, 3445, 3447, 3448, 3450, 3452, 3454, 3456, 3458, 3460, 3462, 3464, 3466, 3468,
++        3470, 3472, 3474, 3475, 3477, 3479, 3481, 3483, 3486, 3488, 3490, 3492, 3494, 3496, 3498, 3500, 3502, 3504,
++        3506, 3508, 3510, 3512, 3514, 3517, 3519, 3521, 3523, 3525, 3527, 3529, 3531, 3533, 3536, 3538, 3540, 3542,
++        3544, 3546, 3548, 3550, 3553, 3555, 3557, 3559, 3561, 3563, 3565, 3568, 3570, 3572, 3574, 3576, 3578, 3580,
++        3582, 3585, 3587, 3589, 3591, 3593, 3595, 3597, 3599, 3601, 3603, 3605, 3608, 3610, 3612, 3614, 3616, 3618,
++        3620, 3622, 3624, 3626, 3628, 3630, 3632, 3634, 3636, 3638, 3640, 3642, 3645, 3647, 3649, 3651, 3653, 3655,
++        3657, 3659, 3661, 3663, 3665, 3667, 3669, 3671, 3673, 3675, 3677, 3679, 3681, 3683, 3685, 3687, 3689, 3691,
++        3693, 3695, 3697, 3699, 3701, 3704, 3706, 3708, 3710, 3712, 3714, 3716, 3718, 3720, 3722, 3724, 3726, 3728,
++        3730, 3732, 3734, 3736, 3738, 3740, 3742, 3744, 3746, 3748, 3750, 3752, 3754, 3756, 3758, 3760, 3762, 3764,
++        3766, 3767, 3769, 3771, 3773, 3775, 3777, 3779, 3781, 3783, 3785, 3787, 3789, 3791, 3793, 3795, 3797, 3799,
++        3801, 3803, 3804, 3806, 3808, 3810, 3812, 3814, 3816, 3818, 3820, 3822, 3824, 3826, 3828, 3830, 3832, 3834,
++        3836, 3837, 3839, 3841, 3843, 3845, 3847, 3849, 3851, 3853, 3855, 3857, 3858, 3860, 3862, 3864, 3866, 3868,
++        3870, 3872, 3873, 3875, 3877, 3879, 3881, 3883, 3885, 3887, 3888, 3890, 3892, 3894, 3896, 3898, 3900, 3902,
++        3904, 3905, 3907, 3909, 3911, 3913, 3915, 3917, 3919, 3920, 3922, 3924, 3926, 3928, 3930, 3932, 3934, 3935,
++        3937, 3939, 3941, 3943, 3945, 3947, 3949, 3950, 3952, 3954, 3955, 3957, 3959, 3961, 3963, 3965, 3967, 3969,
++        3971, 3972, 3974, 3976, 3977, 3979, 3981, 3983, 3985, 3987, 3989, 3991, 3993, 3994, 3996, 3998, 4000, 4001,
++        4003, 4005, 4006, 4008, 4010, 4012, 4014, 4016, 4018, 4020, 4022, 4023, 4025, 4027, 4028, 4030, 4032, 4034,
++        4036, 4037, 4039, 4041, 4042, 4044, 4046, 4048, 4050, 4052, 4054, 4056, 4058, 4059, 4061, 4063, 4064, 4066,
++        4068, 4070, 4072, 4073, 4075, 4077, 4078, 4080, 4082, 4084, 4086, 4087, 4089, 4091, 4092, 4094, 4095,
++    },
++    3,
++};
++
++static const ot_isp_sharpen_attr g_cmos_yuv_sharpen = {
++    /* en */
++    1,
++    /* motion_en */
++    0,
++    /* motion_threshold0 */
++    4,
++    /* motion_threshold1 */
++    10,
++    /* motion_gain0 */
++    0,
++    /* motion_gain1 */
++    255,
++    /* skin_umin */
++    99,
++    /* skin_vmin */
++    134,
++    /* skin_umax */
++    127,
++    /* skin_vmax */
++    150,
++    /* op_type */
++    OT_OP_MODE_AUTO,
++    /* detail_map */
++    OT_ISP_SHARPEN_NORMAL,
++    /* manual para */
++    {
++        /* luma_wgt[OT_ISP_SHARPEN_LUMA_NUM] */
++        {
++            31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
++            31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31
++        },
++        /* texture_strength[OT_ISP_SHARPEN_GAIN_NUM] */
++        {
++            250, 420, 390, 390, 390, 390, 390, 370, 350, 330, 310, 290, 270, 270, 270, 270,
++            270, 270, 266, 260, 244, 230, 230, 230, 230, 230, 230, 210, 190, 190, 170, 150
++        },
++        /* edge_strength[OT_ISP_SHARPEN_GAIN_NUM] */
++        {
++            120, 123, 125, 128, 130, 135, 140, 148, 160, 168, 180, 190, 200, 210, 210, 210,
++            210, 210, 200, 190, 185, 175, 165, 160, 146, 136, 130, 128, 125, 123, 120, 120
++        },
++        /* texture_freq */
++        190,
++        /* edge_freq */
++        128,
++        /* over_shoot */
++        65,
++        /* under_shoot */
++        75,
++        /* motion_texture_strength[OT_ISP_SHARPEN_GAIN_NUM] */
++        {
++            250, 420, 390, 390, 390, 390, 390, 370, 350, 330, 310, 290, 270, 270, 270, 270,
++            270, 270, 266, 260, 244, 230, 230, 230, 230, 230, 230, 210, 190, 190, 170, 150
++        },
++        /* motion_edge_strength[OT_ISP_SHARPEN_GAIN_NUM] */
++        {
++            120, 123, 125, 128, 130, 135, 140, 148, 160, 168, 180, 190, 200, 210, 210, 210,
++            210, 210, 200, 190, 185, 175, 165, 160, 146, 136, 130, 128, 125, 123, 120, 120
++        },
++        /* motion_texture_freq */
++        190,
++        /* motion_edge_freq */
++        128,
++        /* motion_over_shoot */
++        65,
++        /* motion_under_shoot */
++        75,
++        /* u8shoot_sup_str */
++        7,
++        /* u8shoot_sup_adj */
++        9,
++        /* detail_ctrl */
++        128,
++        /* detail_ctrl_threshold */
++        180,
++        /* edge_filt_strength */
++        60,
++        /* edge_filt_max_cap */
++        18,
++        /* r_gain */
++        20,
++        /* g_gain */
++        32,
++        /* b_gain */
++        20,
++        /* skin_gain */
++        25,
++        /* max_sharp_gain */
++        40,
++        {
++            /* shoot_inner_threshold */
++            0,
++            /* shoot_outer_threshold */
++            0,
++            /* shoot_protect_threshold */
++            0,
++        },
++
++        {
++            /* edge_rly_fine_threshold */
++            0,
++            /* edge_rly_coarse_threshold */
++            0,
++            /* edge_overshoot */
++            65,
++            /* edge_undershoot */
++            120,
++            /* edge_gain_by_rly[OT_ISP_SHARPEN_RLYWGT_NUM] */
++            {
++                32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
++            },
++            /* edge_rly_by_mot[OT_ISP_SHARPEN_STDGAIN_NUM] */
++            {
++                16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16
++            },
++            /* edge_rly_by_luma[OT_ISP_SHARPEN_STDGAIN_NUM] */
++            {
++                16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16
++            },
++        },
++        {
++            /* mf_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM] */
++            {
++                32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
++            },
++            /* hf_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM] */
++            {
++                32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32
++            },
++            /* lmt_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM] */
++            {
++                16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16
++            },
++        },
++    },
++    /* auto para */
++    {
++        /* luma_wgt[OT_ISP_SHARPEN_GAIN_NUM][OT_ISP_AUTO_ISO_NUM] */
++        {
++            { 31, 31, 20, 20, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 17, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15 },
++            { 31, 31, 20, 20, 20, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18 },
++            { 31, 31, 23, 23, 23, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21 },
++            { 31, 31, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25 },
++            { 31, 31, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28 },
++            { 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 28, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++            { 23, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 }
++        },
++        /* texture_strength[OT_ISP_SHARPEN_GAIN_NUM][OT_ISP_AUTO_ISO_NUM] */
++        {
++            { 153, 153, 160, 145, 130, 130, 130, 105, 105, 105, 105, 85, 85, 85, 85, 85 },
++            { 172, 167, 190, 170, 145, 145, 145, 120, 120, 120, 120, 100, 100, 100, 100, 100 },
++            { 186, 178, 220, 195, 165, 165, 160, 140, 140, 135, 135, 120, 120, 120, 120, 120 },
++            { 201, 192, 255, 215, 180, 180, 175, 160, 160, 150, 150, 135, 135, 140, 140, 140 },
++            { 217, 207, 275, 230, 200, 200, 185, 175, 175, 160, 160, 150, 150, 160, 160, 160 },
++            { 233, 223, 285, 245, 210, 215, 200, 190, 190, 170, 170, 165, 165, 180, 180, 180 },
++            { 251, 239, 280, 260, 225, 225, 215, 205, 205, 180, 180, 185, 185, 200, 200, 200 },
++            { 269, 255, 275, 265, 240, 240, 230, 220, 220, 190, 190, 200, 200, 210, 210, 210 },
++            { 286, 272, 270, 270, 250, 250, 240, 225, 225, 200, 200, 220, 220, 220, 220, 220 },
++            { 300, 288, 265, 270, 250, 260, 245, 235, 235, 210, 210, 235, 235, 230, 230, 230 },
++            { 308, 299, 260, 265, 250, 270, 255, 245, 245, 220, 220, 245, 245, 230, 230, 230 },
++            { 312, 307, 260, 260, 250, 275, 260, 250, 250, 230, 230, 255, 255, 230, 230, 230 },
++            { 313, 310, 255, 255, 245, 280, 265, 255, 255, 235, 235, 265, 265, 230, 230, 230 },
++            { 311, 311, 250, 250, 240, 285, 270, 255, 255, 240, 240, 275, 275, 230, 230, 230 },
++            { 306, 311, 245, 245, 240, 290, 275, 250, 255, 245, 245, 280, 280, 230, 230, 230 },
++            { 297, 308, 240, 240, 240, 295, 280, 240, 250, 250, 250, 285, 285, 230, 230, 230 },
++            { 285, 301, 235, 235, 235, 295, 280, 235, 250, 250, 255, 290, 290, 230, 230, 230 },
++            { 273, 291, 230, 230, 230, 290, 280, 230, 250, 250, 260, 295, 295, 230, 230, 230 },
++            { 263, 281, 225, 225, 225, 285, 275, 225, 245, 250, 265, 300, 300, 225, 225, 225 },
++            { 255, 271, 225, 220, 220, 275, 270, 225, 245, 250, 270, 300, 300, 220, 220, 220 },
++            { 249, 259, 220, 215, 215, 270, 265, 225, 240, 245, 275, 300, 300, 210, 210, 210 },
++            { 243, 248, 220, 210, 210, 260, 260, 220, 235, 245, 280, 305, 305, 200, 200, 200 },
++            { 234, 238, 215, 205, 205, 255, 255, 220, 230, 240, 280, 305, 305, 190, 190, 190 },
++            { 224, 228, 215, 200, 200, 245, 245, 220, 230, 240, 285, 310, 310, 180, 180, 180 },
++            { 216, 218, 210, 195, 195, 235, 240, 215, 225, 235, 285, 310, 310, 175, 175, 175 },
++            { 208, 208, 200, 190, 190, 230, 235, 215, 220, 230, 285, 305, 305, 170, 170, 170 },
++            { 201, 201, 195, 180, 180, 220, 225, 210, 220, 225, 285, 305, 305, 160, 160, 160 },
++            { 195, 195, 185, 175, 175, 205, 220, 205, 215, 220, 285, 300, 300, 160, 160, 160 },
++            { 188, 188, 175, 170, 170, 195, 210, 195, 210, 215, 280, 300, 300, 150, 150, 150 },
++            { 181, 181, 170, 160, 160, 180, 205, 195, 205, 210, 280, 300, 300, 145, 145, 145 },
++            { 175, 175, 160, 155, 155, 165, 195, 195, 200, 205, 275, 300, 300, 130, 130, 130 },
++            { 171, 171, 150, 150, 150, 150, 150, 150, 195, 200, 270, 300, 300, 115, 115, 115 }
++        },
++        /* edge_strength */
++        {
++            { 195, 195, 195, 195, 195, 195, 400, 440, 500, 475, 475, 475, 475, 475, 475, 475 },
++            { 210, 210, 200, 200, 200, 200, 400, 440, 500, 485, 485, 485, 485, 485, 485, 485 },
++            { 235, 235, 220, 220, 220, 220, 400, 440, 500, 495, 495, 495, 495, 495, 495, 495 },
++            { 260, 260, 230, 230, 230, 230, 400, 440, 500, 500, 500, 500, 500, 500, 500, 500 },
++            { 295, 295, 240, 240, 240, 240, 400, 440, 500, 510, 510, 510, 510, 510, 510, 510 },
++            { 320, 320, 250, 250, 250, 250, 400, 440, 500, 520, 520, 520, 520, 520, 520, 520 },
++            { 340, 340, 260, 260, 260, 260, 420, 460, 540, 530, 530, 530, 530, 530, 530, 530 },
++            { 350, 350, 270, 270, 270, 270, 420, 460, 540, 540, 540, 540, 540, 540, 540, 540 },
++            { 360, 360, 280, 280, 280, 280, 420, 460, 540, 545, 545, 545, 545, 545, 545, 545 },
++            { 360, 360, 280, 280, 280, 280, 420, 460, 540, 550, 550, 550, 550, 550, 550, 550 },
++            { 355, 355, 285, 285, 285, 285, 420, 460, 540, 560, 560, 560, 560, 560, 560, 560 },
++            { 345, 345, 290, 290, 290, 290, 420, 460, 540, 565, 565, 565, 565, 565, 565, 565 },
++            { 335, 335, 290, 290, 290, 290, 420, 460, 540, 570, 570, 570, 570, 570, 570, 570 },
++            { 330, 330, 295, 295, 295, 295, 430, 470, 550, 575, 575, 575, 575, 575, 575, 575 },
++            { 325, 325, 295, 295, 295, 295, 430, 470, 550, 580, 580, 580, 580, 580, 580, 580 },
++            { 320, 320, 295, 295, 295, 295, 440, 470, 550, 575, 575, 575, 575, 575, 575, 575 },
++            { 315, 315, 295, 295, 295, 295, 440, 470, 550, 570, 570, 570, 570, 570, 570, 570 },
++            { 310, 310, 295, 295, 295, 295, 450, 480, 580, 565, 565, 565, 565, 565, 565, 565 },
++            { 305, 305, 295, 295, 295, 295, 460, 500, 580, 560, 560, 560, 560, 560, 560, 560 },
++            { 295, 295, 290, 290, 290, 290, 460, 500, 580, 555, 555, 555, 555, 555, 555, 555 },
++            { 285, 285, 285, 285, 285, 285, 460, 500, 580, 550, 550, 550, 550, 550, 550, 550 },
++            { 280, 280, 280, 280, 280, 280, 460, 500, 580, 540, 540, 540, 540, 540, 540, 540 },
++            { 275, 275, 275, 275, 275, 275, 460, 500, 580, 535, 535, 535, 535, 535, 535, 535 },
++            { 265, 265, 265, 265, 265, 265, 460, 500, 580, 530, 530, 530, 530, 530, 530, 530 },
++            { 250, 250, 250, 250, 250, 250, 460, 500, 580, 520, 520, 520, 520, 520, 520, 520 },
++            { 240, 240, 240, 240, 240, 240, 470, 500, 580, 515, 515, 515, 515, 515, 515, 515 },
++            { 220, 220, 220, 220, 220, 220, 470, 500, 580, 510, 510, 510, 510, 510, 510, 510 },
++            { 200, 200, 200, 200, 200, 200, 470, 500, 580, 500, 500, 500, 500, 500, 500, 500 },
++            { 180, 180, 180, 180, 180, 180, 480, 500, 580, 495, 495, 495, 495, 495, 495, 495 },
++            { 160, 160, 160, 160, 160, 160, 480, 500, 580, 485, 485, 485, 485, 485, 485, 485 },
++            { 140, 140, 140, 140, 140, 140, 480, 500, 580, 480, 480, 480, 480, 480, 480, 480 },
++            { 125, 125, 125, 125, 125, 125, 480, 500, 580, 470, 470, 470, 470, 470, 470, 470 }
++        },
++        /* texture_freq[OT_ISP_AUTO_ISO_NUM] */
++        { 180, 190, 190, 170, 170, 170, 160, 140, 128, 128, 128, 100, 100, 100, 100, 100 },
++        /* edge_freq[OT_ISP_AUTO_ISO_NUM] */
++        { 128, 100, 100, 100, 100, 100, 100, 100, 100, 100, 96, 96, 96, 96, 96, 96 },
++        /* over_shoot[OT_ISP_AUTO_ISO_NUM] */
++        { 60, 62, 62, 64, 64, 64, 56, 52, 50, 50, 30, 10, 10, 10, 10, 10 },
++        /* under_shoot[OT_ISP_AUTO_ISO_NUM] */
++        { 60, 62, 62, 64, 64, 64, 54, 50, 50, 30, 20, 20, 15, 15, 15, 15 },
++        /* motion_texture_strength[OT_ISP_SHARPEN_GAIN_NUM][OT_ISP_AUTO_ISO_NUM] */
++        {
++            { 153, 153, 160, 145, 130, 130, 130, 105, 105, 105, 105, 85, 85, 85, 85, 85 },
++            { 172, 167, 190, 170, 145, 145, 145, 120, 120, 120, 120, 100, 100, 100, 100, 100 },
++            { 186, 178, 220, 195, 165, 165, 160, 140, 140, 135, 135, 120, 120, 120, 120, 120 },
++            { 201, 192, 255, 215, 180, 180, 175, 160, 160, 150, 150, 135, 135, 140, 140, 140 },
++            { 217, 207, 275, 230, 200, 200, 185, 175, 175, 160, 160, 150, 150, 160, 160, 160 },
++            { 233, 223, 285, 245, 210, 215, 200, 190, 190, 170, 170, 165, 165, 180, 180, 180 },
++            { 251, 239, 280, 260, 225, 225, 215, 205, 205, 180, 180, 185, 185, 200, 200, 200 },
++            { 269, 255, 275, 265, 240, 240, 230, 220, 220, 190, 190, 200, 200, 210, 210, 210 },
++            { 286, 272, 270, 270, 250, 250, 240, 225, 225, 200, 200, 220, 220, 220, 220, 220 },
++            { 300, 288, 265, 270, 250, 260, 245, 235, 235, 210, 210, 235, 235, 230, 230, 230 },
++            { 308, 299, 260, 265, 250, 270, 255, 245, 245, 220, 220, 245, 245, 230, 230, 230 },
++            { 312, 307, 260, 260, 250, 275, 260, 250, 250, 230, 230, 255, 255, 230, 230, 230 },
++            { 313, 310, 255, 255, 245, 280, 265, 255, 255, 235, 235, 265, 265, 230, 230, 230 },
++            { 311, 311, 250, 250, 240, 285, 270, 255, 255, 240, 240, 275, 275, 230, 230, 230 },
++            { 306, 311, 245, 245, 240, 290, 275, 250, 255, 245, 245, 280, 280, 230, 230, 230 },
++            { 297, 308, 240, 240, 240, 295, 280, 240, 250, 250, 250, 285, 285, 230, 230, 230 },
++            { 285, 301, 235, 235, 235, 295, 280, 235, 250, 250, 255, 290, 290, 230, 230, 230 },
++            { 273, 291, 230, 230, 230, 290, 280, 230, 250, 250, 260, 295, 295, 230, 230, 230 },
++            { 263, 281, 225, 225, 225, 285, 275, 225, 245, 250, 265, 300, 300, 225, 225, 225 },
++            { 255, 271, 225, 220, 220, 275, 270, 225, 245, 250, 270, 300, 300, 220, 220, 220 },
++            { 249, 259, 220, 215, 215, 270, 265, 225, 240, 245, 275, 300, 300, 210, 210, 210 },
++            { 243, 248, 220, 210, 210, 260, 260, 220, 235, 245, 280, 305, 305, 200, 200, 200 },
++            { 234, 238, 215, 205, 205, 255, 255, 220, 230, 240, 280, 305, 305, 190, 190, 190 },
++            { 224, 228, 215, 200, 200, 245, 245, 220, 230, 240, 285, 310, 310, 180, 180, 180 },
++            { 216, 218, 210, 195, 195, 235, 240, 215, 225, 235, 285, 310, 310, 175, 175, 175 },
++            { 208, 208, 200, 190, 190, 230, 235, 215, 220, 230, 285, 305, 305, 170, 170, 170 },
++            { 201, 201, 195, 180, 180, 220, 225, 210, 220, 225, 285, 305, 305, 160, 160, 160 },
++            { 195, 195, 185, 175, 175, 205, 220, 205, 215, 220, 285, 300, 300, 160, 160, 160 },
++            { 188, 188, 175, 170, 170, 195, 210, 195, 210, 215, 280, 300, 300, 150, 150, 150 },
++            { 181, 181, 170, 160, 160, 180, 205, 195, 205, 210, 280, 300, 300, 145, 145, 145 },
++            { 175, 175, 160, 155, 155, 165, 195, 195, 200, 205, 275, 300, 300, 130, 130, 130 },
++            { 171, 171, 150, 150, 150, 150, 150, 150, 195, 200, 270, 300, 300, 115, 115, 115 }
++        },
++        /* motion_edge_strength     */
++        {
++            { 195, 195, 195, 195, 195, 195, 400, 440, 500, 475, 475, 475, 475, 475, 475, 475 },
++            { 210, 210, 200, 200, 200, 200, 400, 440, 500, 485, 485, 485, 485, 485, 485, 485 },
++            { 235, 235, 220, 220, 220, 220, 400, 440, 500, 495, 495, 495, 495, 495, 495, 495 },
++            { 260, 260, 230, 230, 230, 230, 400, 440, 500, 500, 500, 500, 500, 500, 500, 500 },
++            { 295, 295, 240, 240, 240, 240, 400, 440, 500, 510, 510, 510, 510, 510, 510, 510 },
++            { 320, 320, 250, 250, 250, 250, 400, 440, 500, 520, 520, 520, 520, 520, 520, 520 },
++            { 340, 340, 260, 260, 260, 260, 420, 460, 540, 530, 530, 530, 530, 530, 530, 530 },
++            { 350, 350, 270, 270, 270, 270, 420, 460, 540, 540, 540, 540, 540, 540, 540, 540 },
++            { 360, 360, 280, 280, 280, 280, 420, 460, 540, 545, 545, 545, 545, 545, 545, 545 },
++            { 360, 360, 280, 280, 280, 280, 420, 460, 540, 550, 550, 550, 550, 550, 550, 550 },
++            { 355, 355, 285, 285, 285, 285, 420, 460, 540, 560, 560, 560, 560, 560, 560, 560 },
++            { 345, 345, 290, 290, 290, 290, 420, 460, 540, 565, 565, 565, 565, 565, 565, 565 },
++            { 335, 335, 290, 290, 290, 290, 420, 460, 540, 570, 570, 570, 570, 570, 570, 570 },
++            { 330, 330, 295, 295, 295, 295, 430, 470, 550, 575, 575, 575, 575, 575, 575, 575 },
++            { 325, 325, 295, 295, 295, 295, 430, 470, 550, 580, 580, 580, 580, 580, 580, 580 },
++            { 320, 320, 295, 295, 295, 295, 440, 470, 550, 575, 575, 575, 575, 575, 575, 575 },
++            { 315, 315, 295, 295, 295, 295, 440, 470, 550, 570, 570, 570, 570, 570, 570, 570 },
++            { 310, 310, 295, 295, 295, 295, 450, 480, 580, 565, 565, 565, 565, 565, 565, 565 },
++            { 305, 305, 295, 295, 295, 295, 460, 500, 580, 560, 560, 560, 560, 560, 560, 560 },
++            { 295, 295, 290, 290, 290, 290, 460, 500, 580, 555, 555, 555, 555, 555, 555, 555 },
++            { 285, 285, 285, 285, 285, 285, 460, 500, 580, 550, 550, 550, 550, 550, 550, 550 },
++            { 280, 280, 280, 280, 280, 280, 460, 500, 580, 540, 540, 540, 540, 540, 540, 540 },
++            { 275, 275, 275, 275, 275, 275, 460, 500, 580, 535, 535, 535, 535, 535, 535, 535 },
++            { 265, 265, 265, 265, 265, 265, 460, 500, 580, 530, 530, 530, 530, 530, 530, 530 },
++            { 250, 250, 250, 250, 250, 250, 460, 500, 580, 520, 520, 520, 520, 520, 520, 520 },
++            { 240, 240, 240, 240, 240, 240, 470, 500, 580, 515, 515, 515, 515, 515, 515, 515 },
++            { 220, 220, 220, 220, 220, 220, 470, 500, 580, 510, 510, 510, 510, 510, 510, 510 },
++            { 200, 200, 200, 200, 200, 200, 470, 500, 580, 500, 500, 500, 500, 500, 500, 500 },
++            { 180, 180, 180, 180, 180, 180, 480, 500, 580, 495, 495, 495, 495, 495, 495, 495 },
++            { 160, 160, 160, 160, 160, 160, 480, 500, 580, 485, 485, 485, 485, 485, 485, 485 },
++            { 140, 140, 140, 140, 140, 140, 480, 500, 580, 480, 480, 480, 480, 480, 480, 480 },
++            { 125, 125, 125, 125, 125, 125, 480, 500, 580, 470, 470, 470, 470, 470, 470, 470 }
++        },
++        /* motion_texture_freq[OT_ISP_AUTO_ISO_NUM] */
++        { 180, 190, 190, 170, 170, 170, 160, 140, 128, 128, 128, 100, 100, 100, 100, 100 },
++        /* motion_edge_freq[OT_ISP_AUTO_ISO_NUM] */
++        { 128, 100, 100, 100, 100, 100, 100, 100, 100, 100, 96, 96, 96, 96, 96, 96 },
++        /* motion_over_shoot[OT_ISP_AUTO_ISO_NUM] */
++        { 60, 62, 62, 64, 64, 64, 56, 52, 50, 50, 30, 10, 10, 10, 10, 10 },
++        /* motion_under_shoot[OT_ISP_AUTO_ISO_NUM] */
++        { 60, 62, 62, 64, 64, 64, 54, 50, 50, 30, 20, 20, 15, 15, 15, 15 },
++        /* shoot_sup_strength[OT_ISP_AUTO_ISO_NUM] */
++        { 8, 8, 7, 7, 7, 6, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0 },
++        /* shoot_sup_adj[OT_ISP_AUTO_ISO_NUM] */
++        { 9, 9, 8, 8, 7, 7, 7, 6, 0, 0, 0, 0, 0, 0, 0, 0 },
++        /* detail_ctrl[OT_ISP_AUTO_ISO_NUM] */
++        { 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 120, 120, 120, 120, 120, 120 },
++        /* detail_ctrl_threshold[OT_ISP_AUTO_ISO_NUM] */
++        { 180, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160, 160 },
++        /* edge_filt_strength[OT_ISP_AUTO_ISO_NUM] */
++        { 60, 58, 60, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62, 62 },
++        /* edge_filt_max_cap */
++        { 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18 },
++        /* r_gain[OT_ISP_AUTO_ISO_NUM] */
++        { 12, 16, 20, 24, 24, 24, 26, 28, 31, 31, 31, 31, 31, 31, 31, 31 },
++        /* g_gain[OT_ISP_AUTO_ISO_NUM] */
++        { 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32 },
++        /* b_gain[OT_ISP_AUTO_ISO_NUM] */
++        { 18, 20, 24, 24, 24, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22 },
++        /* skin_gain[OT_ISP_AUTO_ISO_NUM] */
++        { 30, 30, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31 },
++        /* max_sharp_gain[OT_ISP_AUTO_ISO_NUM] */
++        { 30, 30, 30, 30, 30, 26, 20, 20, 18, 18, 18, 18, 18, 18, 18, 18 },
++        {
++            /* shoot_inner_threshold[OT_ISP_AUTO_ISO_NUM] */
++            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++            /* shoot_outer_threshold[OT_ISP_AUTO_ISO_NUM] */
++            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++            /* shoot_protect_threshold[OT_ISP_AUTO_ISO_NUM]  */
++            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++        },
++        {
++            /* edge_rly_fine_threshold[OT_ISP_AUTO_ISO_NUM] */
++            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++            /* edge_rly_coarse_threshold[OT_ISP_AUTO_ISO_NUM] */
++            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++            /* edge_overshoot[OT_ISP_AUTO_ISO_NUM] */
++            {20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20},
++            /* edge_undershoot[OT_ISP_AUTO_ISO_NUM] */
++            {120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120},
++            /* edge_gain_by_rly[OT_ISP_SHARPEN_RLYWGT_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}
++            },
++            /* edge_rly_by_mot[OT_ISP_SHARPEN_STDGAIN_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}
++            },
++            /* edge_rly_by_luma[OT_ISP_SHARPEN_STDGAIN_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}
++            },
++        },
++        {
++            /* mf_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}
++            },
++            /* hf_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32},
++                {32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32}
++            },
++            /* lmf_gain_by_mot[OT_ISP_SHARPEN_MOT_NUM][OT_ISP_AUTO_ISO_NUM] */
++            {
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16},
++                {16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16}
++            },
++        }
++    },
++};
++
++static const ot_isp_dehaze_attr g_cmos_dehaze = {
++    /* enable */
++    0,
++    /* user_lut_enable */
++    0,
++    /* dehaze_lut */
++    {
++        0, 9, 13, 17, 21, 25, 29, 33, 37, 42, 46, 50, 54, 58, 62, 67, 71, 75, 79, 83, 87, 91,
++        95, 99, 102, 106, 110, 114, 117, 121, 124, 128, 131, 134, 137, 141, 144, 147, 150,
++        153, 156, 159, 162, 165, 168, 170, 173, 176, 178, 181, 184, 186, 189, 191, 193, 196,
++        198, 200, 203, 205, 207, 209, 211, 213, 215, 217, 219, 221, 222, 224, 226, 228, 229,
++        231, 232, 234, 235, 237, 238, 240, 241, 242, 243, 244, 246, 247, 248, 249, 249, 250,
++        251, 252, 253, 253, 254, 254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
++        255, 255, 255, 255, 255, 255, 255, 255, 254, 254, 253, 253, 252, 251, 251, 250, 249,
++        249, 248, 247, 247, 246, 245, 244, 244, 243, 242, 241, 240, 239, 238, 237, 236, 235,
++        233, 232, 231, 230, 229, 227, 226, 225, 223, 222, 221, 219, 218, 216, 215, 213, 212,
++        210, 209, 208, 206, 205, 203, 201, 200, 198, 197, 195, 193, 192, 190, 188, 187, 185,
++        183, 181, 180, 178, 176, 174, 172, 170, 169, 167, 165, 163, 161, 159, 157, 155, 153,
++        151, 149, 147, 145, 143, 140, 138, 136, 134, 132, 130, 128, 125, 123, 121, 119, 116,
++        114, 112, 110, 107, 105, 103, 100, 98, 96, 93, 91, 89, 86, 84, 81, 79, 77, 74, 72, 69,
++        67, 64, 62, 59, 57, 54, 52, 49, 47, 44, 42, 39, 37, 34, 31, 29, 26, 24, 21, 18, 16, 13, 11,
++        8, 5, 3, 0
++    },
++    /* op_type */
++    0,
++    /* manual_strength */
++    {
++        128
++    },
++    /* auto_strength */
++    {
++        128
++    },
++    /* tmprflt_incr_coef */
++    8,
++    /* tmprflt_decr_coef */
++    64,
++};
++
++static const ot_isp_drc_attr g_cmos_drc = {
++    /* enable */
++    0,
++    /* curve_select */
++    OT_ISP_DRC_CURVE_ASYMMETRY,
++    /* purple_reduction_strength */
++    35,
++    /* bright_gain_limit */
++    10,
++    /* bright_gain_limit_step */
++    8,
++    /* dark_gain_limit_luma */
++    0,
++    /* dark_gain_limit_chroma */
++    0,
++    /* contrast_ctrl */
++    8,
++    /* rim_reduction_strength */
++    32,
++    /* rim_reduction_threshold */
++    30,
++    /* color_correction_lut[OT_ISP_DRC_CC_NODE_NUM] */
++    {
++        1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024,
++        1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024
++    },
++    /* tone_mapping_value[OT_ISP_DRC_TM_NODE_NUM] */
++    {
++        8,     8,     16,    24,    31,    39,    48,    56,    65,    75,    85,    95,    106,   118,   130,   143,
++        156,   170,   185,   201,   218,   235,   254,   274,   294,   316,   339,   364,   390,   417,   446,   477,
++        509,   543,   579,   617,   658,   701,   746,   794,   844,   898,   955,   1015,  1078,  1145,  1216,  1291,
++        1370,  1454,  1543,  1637,  1736,  1841,  1952,  2069,  2194,  2325,  2465,  2612,  2767,  2932,  3106,  3290,
++        3485,  3691,  3909,  4140,  4384,  4641,  4914,  5202,  5507,  5830,  6171,  6531,  6913,  7316,  7742,  8193,
++        8669,  9173,  9705,  10268, 10863, 11492, 12145, 12808, 13483, 14171, 14872, 15587, 16319, 17069, 17840, 18635,
++        19458, 19881, 20313, 20754, 21204, 21661, 22122, 22586, 23053, 23525, 24000, 24480, 24965, 25455, 25950, 26451,
++        26959, 27473, 27995, 28524, 29062, 29609, 30165, 30732, 31309, 31899, 32501, 33116, 33746, 34391, 35043, 35706,
++        36381, 37066, 37763, 38472, 39192, 39925, 40671, 41429, 42201, 42591, 42986, 43383, 43784, 44189, 44597, 45008,
++        45424, 45842, 46265, 46691, 47121, 47555, 47993, 48434, 48880, 49329, 49783, 50241, 50703, 51169, 51639, 52113,
++        52592, 53075, 53564, 54056, 54552, 55054, 55560, 56071, 56586, 56846, 57107, 57369, 57632, 57896, 58162, 58429,
++        58697, 58967, 59238, 59510, 59783, 60057, 60333, 60611, 60889, 61169, 61451, 61733, 62017, 62303, 62589, 62877,
++        63167, 63458, 63750, 64044, 64340, 64636, 64934, 65234
++    },
++    /* spatial_filter_coef */
++    1,
++    /* range_filter_coef */
++    2,
++    /* detail_adjust_coef */
++    8,
++    {
++        {
++            /* local_mixing_bright_max */
++            96,
++            /* local_mixing_bright_min */
++            48,
++            /* local_mixing_bright_threshold */
++            100,
++            /* local_mixing_bright_slope */
++            -3,
++        },
++    },
++    {
++        {
++            /* local_mixing_dark_max */
++            96,
++            /* local_mixing_dark_min */
++            48,
++            /* local_mixing_dark_threshold */
++            100,
++            /* local_mixing_dark_slope */
++            -3,
++        },
++    },
++    /* high_saturation_color_ctrl */
++    15,
++    /* global_color_ctrl */
++    0,
++    /* shoot_reduction_en */
++    1,
++    /* op_type */
++    OT_OP_MODE_MANUAL,
++    /* manual_attr */
++    {
++        /* manual_strength */
++        256,
++    },
++    /* auto_attr */
++    {
++        /* auto_strength */
++        512,
++        /* auto_strength_max */
++        1023,
++        /* auto_strength_min */
++        512,
++    },
++    /* asymmetry_curve */
++    {
++        /* asymmetry */
++        6,
++        /* second_pole */
++        200,
++        /* stretch */
++        40,
++        /* compress */
++        170
++    },
++    /* auto_curve */
++    {
++        /* brightness */
++        8,
++        /* contrast */
++        8,
++        /* tolerance */
++        6,
++    },
++    /* bcnr_attr */
++    {
++        /* bcnr_en */
++        0,
++        /* bcnr_detail_restore */
++        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++        /* bcnr_strength */
++        3,
++    }
++};
++
++static const ot_isp_ca_attr g_cmos_ca = {
++    /* CA */
++    1,
++    0,
++    {
++        {
++            36, 81, 111, 136, 158, 182, 207, 228, 259, 290, 317, 345, 369, 396, 420, 444, 468, 492, 515, 534,
++            556, 574, 597, 614, 632, 648, 666, 681, 697, 709, 723, 734, 748, 758, 771, 780, 788, 800, 808,
++            815, 822, 829, 837, 841, 848, 854, 858, 864, 868, 871, 878, 881, 885, 890, 893, 897, 900, 903,
++            906, 909, 912, 915, 918, 921, 924, 926, 929, 931, 934, 936, 938, 941, 943, 945, 947, 949, 951,
++            952, 954, 956, 958, 961, 962, 964, 966, 968, 969, 970, 971, 973, 974, 976, 977, 979, 980, 981,
++            983, 984, 985, 986, 988, 989, 990, 991, 992, 993, 995, 996, 997, 998, 999, 1000, 1001, 1004,
++            1005, 1006, 1007, 1009, 1010, 1011, 1012, 1014, 1016, 1017, 1019, 1020, 1022, 1024
++        },
++        /* ISO */
++        { 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1000, 950, 900, 900, 800, 800, 800, 800, 800 },
++        {
++            811, 812, 812, 812, 812, 812, 811, 810, 810, 809, 808, 807, 807, 806, 805, 805, 804, 804, 804, 804,
++            804, 805, 806, 807, 808, 810, 813, 815, 819, 822, 827, 831, 837, 843, 850, 857, 865, 874, 883,
++            893, 903, 914, 925, 936, 947, 959, 971, 983, 995, 1007, 1018, 1030, 1042, 1053, 1065, 1075,
++            1086, 1096, 1106, 1115, 1124, 1132, 1139, 1146, 1152, 1158, 1163, 1168, 1172, 1176, 1180,
++            1183, 1186, 1189, 1192, 1194, 1196, 1198, 1200, 1201, 1202, 1204, 1205, 1206, 1207, 1208,
++            1209, 1210, 1211, 1212, 1213, 1214, 1215, 1217, 1218, 1220, 1222, 1224, 1226, 1227, 1229,
++            1231, 1232, 1234, 1236, 1237, 1239, 1240, 1242, 1243, 1245, 1246, 1248, 1249, 1250, 1252,
++            1253, 1255, 1256, 1258, 1259, 1260, 1262, 1263, 1265, 1266, 1268, 1269
++        },
++    },
++    {
++        {
++            56, 60, 64, 68, 71, 74, 77, 79, 82, 85, 87, 89, 93, 96, 99, 102, 105, 108, 110, 112, 115, 117, 119,
++            120, 122, 124, 125, 127, 128, 130, 131, 133, 135, 136, 138, 141, 143, 145, 147, 150, 152, 155,
++            157, 159, 162, 164, 166, 168, 171, 173, 175, 177, 179, 181, 184, 186, 188, 190, 192, 193, 195,
++            197, 198, 198, 199, 198, 198, 196, 195, 193, 191, 189, 186, 184, 181, 179, 177, 174, 172, 169,
++            167, 164, 161, 159, 156, 153, 151, 148, 145, 142, 139, 136, 133, 130, 127, 124, 121, 118, 115,
++            113, 110, 109, 108, 108, 109, 111, 113, 115, 118, 121, 124, 127, 130, 133, 136, 139, 142, 145,
++            148, 151, 154, 157, 160, 163, 166, 169, 172, 175
++        },
++        {
++            232, 225, 219, 214, 208, 202, 197, 192, 186, 181, 176, 171, 166, 161, 156, 151, 146, 141, 136, 132,
++            128, 123, 119, 115, 110, 106, 101, 97, 92, 88, 83, 79, 75, 71, 67, 64, 61, 59, 57, 55, 54, 54,
++            53, 52, 51, 50, 50, 49, 48, 48, 47, 46, 46, 45, 44, 44, 43, 42, 42, 41, 41, 40, 40, 40, 40, 40,
++            40, 41, 41, 42, 42, 43, 44, 45, 46, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
++            61, 62, 64, 65, 67, 68, 70, 72, 75, 78, 81, 84, 87, 91, 94, 97, 100, 103, 106, 109, 112, 115,
++            118, 121, 124, 127, 130, 133, 136, 139, 143, 146, 149, 152, 155, 159, 162, 166
++        },
++        {
++            92, 89, 87, 85, 83, 81, 79, 77, 75, 74, 72, 72, 73, 76, 78, 80, 82, 84, 85, 87, 88, 88, 89, 89, 89,
++            88, 88, 87, 87, 87, 86, 87, 87, 88, 90, 92, 94, 96, 99, 101, 103, 106, 108, 110, 113, 115, 117,
++            119, 121, 123, 126, 128, 130, 132, 134, 136, 138, 140, 142, 144, 147, 149, 151, 153, 155, 157,
++            159, 161, 163, 165, 166, 168, 170, 172, 173, 175, 176, 178, 180, 181, 183, 185, 186, 188, 190,
++            191, 193, 194, 196, 198, 200, 201, 203, 205, 207, 208, 210, 212, 214, 215, 217, 218, 219, 219,
++            219, 219, 218, 216, 215, 213, 211, 209, 207, 205, 203, 201, 199, 197, 195, 194, 192, 190, 188,
++            186, 184, 182, 180, 178
++        },
++    },
++};
++
++
++/* ISP dgain target range */
++#define IMX662_ISP_DGAIN_TARGET_MIN      1
++#define IMX662_ISP_DGAIN_TARGET_MAX      128
++
++static ot_isp_piris_attr g_piris = {
++    0,   /* bStepFNOTableChange */
++    1,   /* bZeroIsMax */
++    94,  /* u16TotalStep */
++    62,  /* u16StepCount */
++    /* Step-F number mapping table. F1.0 is 1024 and F32.0 is 1 */
++    { 30,  35,  40,  45,  50,  56,  61,  67,  73,  79,  85,  92,  98,  105, 112, 120, 127, 135, 143, 150, 158,
++      166, 174, 183, 191, 200, 208, 217, 225, 234, 243, 252, 261, 270, 279, 289, 298, 307, 316, 325, 335, 344,
++      353, 362, 372, 381, 390, 399, 408, 417, 426, 435, 444, 453, 462, 470, 478, 486, 493, 500, 506, 512 },
++    OT_ISP_IRIS_F_NO_1_4,   /* enMaxIrisFNOTarget */
++    OT_ISP_IRIS_F_NO_5_6,   /* enMinIrisFNOTarget */
++    1,
++    512,
++    32
++};
++
++static const ot_isp_cmos_black_level g_cmos_blc = {
++    TD_FALSE, /* user_black_level_en */
++    {
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++        {1200, 1200, 1200, 1200},
++    },   /* user_black_level */
++    OT_ISP_BLACK_LEVEL_MODE_AUTO, /* ot_isp_black_level_mode */
++    {
++        {
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++            {1024, 1024, 1024, 1024},
++        },
++    }, /* manual_attr */
++};
++
++/* AWB CCM calibration - placeholder, populate from IMX662 tuning data */
++static ot_isp_awb_ccm g_awb_ccm = {
++    4,
++    {
++        {
++            6473,
++            { 0x017b, 0x8076, 0x8005, 0x8042, 0x017f, 0x803d, 0x000b, 0x8097, 0x018c },
++        },
++        {
++            5132,
++            { 0x0189, 0x809f, 0x0016, 0x8037, 0x013c, 0x8005, 0x001f, 0x80d7, 0x01b8 },
++        },
++        {
++            3565,
++            { 0x0190, 0x8075, 0x801b, 0x8053, 0x0186, 0x8033, 0x0025, 0x80ca, 0x01a5 },
++        },
++        {
++            2580,
++            { 0x01b5, 0x80aa, 0x800b, 0x8050, 0x0153, 0x8003, 0x0048, 0x812d, 0x01e5 },
++        },
++    },
++};
++
++static ot_isp_awb_agc_table g_awb_agc_table = {
++    1, /* bvalid */
++    { 0x80, 0x76, 0x70, 0x6C, 0x69, 0x66, 0x5A, 0x4E, 0x44, 0x40, 0x38, 0x38, 0x38, 0x38, 0x38, 0x38 }
++};
++
++static const ot_isp_dng_color_param g_cmos_dng_color_param = {
++    { 286, 256, 608 },                         /* wb_gain1: R=286, G=256, B=608 (low CT) */
++    { 415, 256, 429 },                         /* wb_gain2: R=415, G=256, B=429 (high CT) */
++    { 2810, { 0x01AC, 0x8093, 0x8019,          /* ccm_tab1: color_temp=2810K (low CT) */
++              0x8070, 0x01EA, 0x807A,
++              0x802A, 0x80F3, 0x021D } },
++    { 4940, { 0x01D7, 0x8084, 0x8053,          /* ccm_tab2: color_temp=4940K (high CT) */
++              0x8053, 0x01D9, 0x8086,
++              0x8010, 0x80B3, 0x01C3 } }
++};
++
++/* ISP default config - linear mode */
++#define IMX662_LINEAR_FRAMERATE                    30
++#define IMX662_FULL_LINES_MAX                      0xFFFF
++
++/* AE */
++#define IMX662_AGAIN_MIN                             1024   /* min analog gain = 1x */
++#define IMX662_AGAIN_MAX                           32768    /* max analog gain, sensor specific */
++#define IMX662_AGAIN_STEP                            16
++#define IMX662_DGAIN_MIN                             1024   /* min digital gain = 1x */
++#define IMX662_DGAIN_MAX                           16384    /* max digital gain */
++#define IMX662_DGAIN_STEP                            16
++#define IMX662_ISP_DGAIN_SHIFT                       8
++#define IMX662_AE_COMPENSATION_DEFAULT              0x40
++#define IMX662_AE_EXP_MODE                     OT_ISP_AE_EXP_HIGHLIGHT_PRIOR
++
++#define IMX662_INT_TIME_ACCURACY                     1
++#define IMX662_AGAIN_ACCURACY                        1
++#define IMX662_DGAIN_ACCURACY                     0.015625
++#define IMX662_FL_OFFSET_LINEAR                          4
++#define IMX662_FL_OFFSET_WDR_SHORT                     4
++#define IMX662_FL_OFFSET_WDR_LONG                      4
++#define IMX662_MAX_INT_TIME_TARGET               65535
++
++/* Piris (iris) */
++#define IMX662_PIRIS_ATTR                             OT_ISP_IRIS_HW
++
++/* Black level */
++#define IMX662_BLACK_LEVEL_DEFAULT                      0x100
++#define IMX662_BLACK_LEVEL_MIN                          0x000
++#define IMX662_BLACK_LEVEL_MAX                          0xFFF
++
++/* DNG/WB calibration - placeholders, need to be populated from sensor datasheet */
++#define IMX662_CALIBRATE_STATIC_TEMP              5000
++#define IMX662_CALIBRATE_STATIC_WB_R_GAIN         256
++#define IMX662_CALIBRATE_STATIC_WB_GR_GAIN        256
++#define IMX662_CALIBRATE_STATIC_WB_GB_GAIN        256
++#define IMX662_CALIBRATE_STATIC_WB_B_GAIN         256
++
++#define IMX662_CALIBRATE_AWB_P1                     0
++#define IMX662_CALIBRATE_AWB_P2                     256
++#define IMX662_CALIBRATE_AWB_Q1                     0
++#define IMX662_CALIBRATE_AWB_A1                11800
++#define IMX662_CALIBRATE_AWB_B1                10240
++#define IMX662_CALIBRATE_AWB_C1                        0
++
++#define IMX662_GOLDEN_RGAIN                         0
++#define IMX662_GOLDEN_BGAIN                         0
++
++/* WDR */
++#define IMX662_WDR_MODE_NONE                  OT_WDR_MODE_NONE
++#define IMX662_WDR_MODE_SHORT             OT_WDR_MODE_SHORT
++#define IMX662_WDR_MODE_LONG                 OT_WDR_MODE_LONG
++
++/* Input clock */
++#define IMX662_INPUT_CLOCK                       27000000
++
++/* VMAX register addresses (20-bit, 3 bytes) */
++#define IMX662_VMAX_REG_LSB                          0x3028
++#define IMX662_VMAX_REG_MID                          0x3029
++#define IMX662_VMAX_REG_MSB                          0x302A
++
++/* HMAX register addresses (12-bit, 2 bytes) */
++#define IMX662_HMAX_REG_LSB                          0x302C
++#define IMX662_HMAX_REG_MSB                          0x302D
++
++/* Exposure register */
++#define IMX662_EXP_REG_LSB                          0x3050
++#define IMX662_EXP_REG_MID                          0x3051
++#define IMX662_EXP_REG_MSB                          0x3052
++
++/* Global gain registers (analog, 16-bit) */
++#define IMX662_AGAIN_REG_LSB                       0x3070
++#define IMX662_AGAIN_REG_MSB                       0x3071
++
++/* Digital gain registers (16-bit) */
++#define IMX662_DGAIN_REG_LSB                       0x0910
++#define IMX662_DGAIN_REG_MSB                       0x0911
++
++
++
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++#endif /* IMX662_CMOS_PARAM_H_ */
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
+new file mode 100644
+index 0000000..5fa85fe
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.c
+@@ -0,0 +1,277 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#include "sensor_common.h"
++#include "imx662_cmos.h"
++#include "imx662_cfg.h"
++
++static void imx662_default_reg_init(cis_info *cis)
++{
++    td_u32 i;
++    td_s32 ret = TD_SUCCESS;
++    ot_isp_sns_state *past_sensor = TD_NULL;
++
++    past_sensor = cis->sns_state;
++    for (i = 0; i < past_sensor->regs_info[0].reg_num; i++) {
++        ret += cis_write_reg(&cis->i2c,
++            past_sensor->regs_info[0].i2c_data[i].reg_addr,
++            past_sensor->regs_info[0].i2c_data[i].data);
++    }
++
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write register failed!\n");
++    }
++    return;
++}
++
++td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len)
++{
++    td_u32 i;
++
++    for (i = 0; i < len; i++) {
++        sns_check_return(cis_write_reg(&cis->i2c, cfg->addr, cfg->data));
++        cfg++;
++    }
++
++    imx662_default_reg_init(cis);
++
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
++    td_u8 adbit, td_u8 mdbit)
++{
++    td_s32 ret;
++    td_u32 len;
++    const cis_reg_cfg *cfg = g_imx662_init_seq;
++
++    sns_check_pointer_return(cis);
++
++    len = IMX662_INIT_SEQ_LEN;
++    ret = imx662_reg_init(cis, cfg, len);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("imx662_reg_init failed!\n");
++        return ret;
++    }
++
++    /* Mode-specific registers */
++    /* DATARATE_SEL */
++    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3015 failed!\n");
++        return ret;
++    }
++
++    /* WINMODE - HD1080 crop mode (matching SigmaStar reference) */
++    ret = cis_write_reg(&cis->i2c, 0x3018, IMX662_WINMODE_HD1080);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3018 failed!\n");
++        return ret;
++    }
++
++    /* LANEMODE */
++    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3040 failed!\n");
++        return ret;
++    }
++
++    /* ADBIT */
++    ret = cis_write_reg(&cis->i2c, 0x3022, adbit);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3022 failed!\n");
++        return ret;
++    }
++
++    /* MDBIT */
++    ret = cis_write_reg(&cis->i2c, 0x3023, mdbit);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3023 failed!\n");
++        return ret;
++    }
++
++    /* ADDMODE non-binning */
++    ret = cis_write_reg(&cis->i2c, 0x301B, 0x00);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x301B failed!\n");
++        return ret;
++    }
++
++    /* 12-bit normal output registers (SigmaStar reference) */
++    ret = cis_write_reg(&cis->i2c, 0x3A50, 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A50 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3A51, 0x03);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A51 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3A52, 0x00);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3A52 failed!\n");
++        return ret;
++    }
++
++    /* HMAX (low byte first, little-endian like VMAX) */
++    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302C failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302D failed!\n");
++        return ret;
++    }
++
++    /* VMAX */
++    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3028 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3029 failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x302A failed!\n");
++        return ret;
++    }
++
++    /* Exit standby */
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write 0x3000 exit standby failed!\n");
++        return ret;
++    }
++
++    /* Mirror normal */
++    ret = cis_write_reg(&cis->i2c, IMX662_REG_MIRROR_FLIP, IMX662_MIRROR_NORMAL);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write mirror/flip failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_standby_mode(cis_info *cis)
++{
++    td_s32 ret;
++    sns_check_pointer_return(cis);
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write standby failed!\n");
++        return ret;
++    }
++    return TD_SUCCESS;
++}
++
++td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate)
++{
++    td_s32 ret;
++    sns_check_pointer_return(cis);
++
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_ENTER);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write standby failed!\n");
++        return ret;
++    }
++
++    cis_delay_ms(1);
++
++    /* Re-write all mode registers — sensor resets them on standby enter */
++    ret = cis_write_reg(&cis->i2c, 0x3015, datarate);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write DATARATE_SEL failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3018, IMX662_WINMODE_HD1080);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write WINMODE failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x301B, 0x00);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write ADDMODE failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3022, IMX662_ADBIT_12BIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write ADBIT failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3023, IMX662_MDBIT_12BIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write MDBIT failed!\n");
++        return ret;
++    }
++
++    /* 12-bit normal output registers */
++    ret = cis_write_reg(&cis->i2c, 0x3A50, 0xFF);
++    cis_write_reg(&cis->i2c, 0x3A51, 0x03);
++    cis_write_reg(&cis->i2c, 0x3A52, 0x00);
++
++    /* Crop registers */
++    cis_write_reg(&cis->i2c, 0x303C, 0x08);
++    cis_write_reg(&cis->i2c, 0x303D, 0x00);
++    cis_write_reg(&cis->i2c, 0x303E, 0x80);
++    cis_write_reg(&cis->i2c, 0x303F, 0x07);
++    cis_write_reg(&cis->i2c, 0x3044, 0x08);
++    cis_write_reg(&cis->i2c, 0x3045, 0x00);
++    cis_write_reg(&cis->i2c, 0x3046, 0x38);
++    cis_write_reg(&cis->i2c, 0x3047, 0x04);
++
++    ret = cis_write_reg(&cis->i2c, 0x3040, lane_mode);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write LANEMODE failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x302C, hmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write HMAX low failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302D, (hmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write HMAX high failed!\n");
++        return ret;
++    }
++
++    ret = cis_write_reg(&cis->i2c, 0x3028, vmax & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX low failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x3029, (vmax >> 8) & 0xFF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX mid failed!\n");
++        return ret;
++    }
++    ret = cis_write_reg(&cis->i2c, 0x302A, (vmax >> 16) & 0xF);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write VMAX high failed!\n");
++        return ret;
++    }
++
++    cis_delay_ms(1);
++
++    ret = cis_write_reg(&cis->i2c, 0x3000, IMX662_STANDBY_EXIT);
++    if (ret != TD_SUCCESS) {
++        isp_err_trace("write exit standby failed!\n");
++        return ret;
++    }
++
++    return TD_SUCCESS;
++}
+diff --git a/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
+new file mode 100644
+index 0000000..e08c8b9
+--- /dev/null
++++ b/libraries/sensor/hi3516cv6xx/sony_imx662/imx662_sensor_ctrl.h
+@@ -0,0 +1,33 @@
++/*
++  Copyright (c), 2001-2025, Shenshu Tech. Co., Ltd.
++ */
++
++#ifndef IMX662_SENSOR_CTRL_H_
++#define IMX662_SENSOR_CTRL_H_
++
++#ifdef __cplusplus
++#if __cplusplus
++extern "C" {
++#endif
++#endif
++
++#include "sensor_common.h"
++
++/* write init sequence from cfg table */
++td_s32 imx662_reg_init(cis_info *cis, const cis_reg_cfg *cfg, td_u32 len);
++
++/* per-mode linear init: writes global seq + mode-specific registers */
++td_s32 imx662_linear_init(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate,
++    td_u8 adbit, td_u8 mdbit);
++
++/* standby / restart (restart re-applies mode timing) */
++td_s32 imx662_standby_mode(cis_info *cis);
++td_s32 imx662_restart_mode(cis_info *cis, td_u32 vmax, td_u32 hmax, td_u8 lane_mode, td_u8 datarate);
++
++#ifdef __cplusplus
++#if __cplusplus
++}
++#endif
++#endif
++
++#endif /* IMX662_SENSOR_CTRL_H_ */
