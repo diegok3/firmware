@@ -1,13 +1,16 @@
 diff --git a/kernel/sys_config/hi3516cv6xx/sys_cfg.c b/kernel/sys_config/hi3516cv6xx/sys_cfg.c
+index 6f94620..e5b09d7 100644
 --- a/kernel/sys_config/hi3516cv6xx/sys_cfg.c
 +++ b/kernel/sys_config/hi3516cv6xx/sys_cfg.c
-@@ -27,3 +27,4 @@
+@@ -26,6 +26,7 @@
+ #define SENSOR_NAME_SC500AI "sc500ai"
  #define SENSOR_NAME_SC431HAI "sc431hai"
  #define SENSOR_NAME_OS04D10 "os04d10"
 +#define SENSOR_NAME_IMX662 "imx662"
  #define MIPI_AD "mipi_ad"
-@@ -286,8 +287,9 @@
-     if ((strncmp(SENSOR_NAME_SC4336P, name, len) == 0) ||
+ 
+ static void *g_reg_crg_base = NULL;
+@@ -286,7 +287,8 @@ static unsigned int parse_sensor_clock(const char *name, unsigned int name_len)
          (strncmp(SENSOR_NAME_GC4023, name, len) == 0) ||
          (strncmp(SENSOR_NAME_SC431HAI, name, len) == 0) ||
          (strncmp(SENSOR_NAME_SC450AI, name, len) == 0) ||
@@ -17,3 +20,52 @@ diff --git a/kernel/sys_config/hi3516cv6xx/sys_cfg.c b/kernel/sys_config/hi3516c
          clock = 0xA001;   /* 27M */
      } else if ((strncmp(SENSOR_NAME_OS04D10, name, len) == 0)) {
          clock = 0x4001;  /* 24M */
+@@ -432,6 +434,48 @@ static void sensor_cfg(void)
+     }
+ }
+ 
++/* Runtime sensor-clock knob (waybeam parity).
++ * Writing a known MCLK frequency in Hz reprograms the sensor0 clock divider
++ * (CRG 0x8440, base 0x11010000); writing a raw CRG value < 65536 writes it
++ * verbatim so unknown encodings can be probed on-device.  Values observed in
++ * this file: 0xA001 = 27 MHz, 0x4001 = 24 MHz, 0x8010 = 37.125 MHz. */
++static unsigned int g_sns0_clk_crg;
++
++static int sns0_clk_hz_set(const char *val, const struct kernel_param *kp)
++{
++    unsigned int freq;
++    unsigned int crg;
++    int ret;
++
++    ret = kstrtouint(val, 0, &freq);
++    if (ret != 0) {
++        return ret;
++    }
++    if (freq < 0x10000) {
++        crg = freq;          /* raw CRG encoding probe */
++    } else {
++        switch (freq) {
++        case 37125000: crg = 0x8010; break; /* 37.125 MHz */
++        case 27000000: crg = 0xA001; break; /* 27 MHz */
++        case 24000000: crg = 0x4001; break; /* 24 MHz */
++        default: return -EINVAL;
++        }
++    }
++    if (g_reg_crg_base == NULL) {
++        return -EAGAIN;
++    }
++    sys_writel(g_reg_crg_base, 0x8440, crg);
++    g_sns0_clk_crg = crg;
++    return 0;
++}
++
++static const struct kernel_param_ops g_sns0_clk_hz_ops = {
++    .set = sns0_clk_hz_set,
++    .get = param_get_uint,
++};
++
++module_param_cb(sns0_clk_hz, &g_sns0_clk_hz_ops, &g_sns0_clk_crg, 0600);
++
+ static int __init ot_sysconfig_init(void)
+ {
+     int ret;
