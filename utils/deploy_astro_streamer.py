@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Deploy de waybeam_test + libsns_imx662.so completa + open_sys_config.ko
+"""Deploy de astro_streamer + libsns_imx662.so completa + open_sys_config.ko
 con knob sns0_clk_hz al device (192.168.1.16, root/12345).
 
 Uso:
-  python3 utils/deploy_waybeam_test.py [--ip 192.168.1.16] [--only-binary]
+  python3 utils/deploy_astro_streamer.py [--ip 192.168.1.16] [--only-binary]
       --only-binary   sube solo el binario (no .ko ni .so)
 """
 import base64
@@ -19,10 +19,10 @@ PASS = "12345"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FILES = {
-    "waybeam_test": {
-        "local": os.path.join(ROOT, "utils", "waybeam_test"),
-        "remote_tmp": "/tmp/waybeam_test",
-        "install": "chmod +x /tmp/waybeam_test",
+    "astro_streamer": {
+        "local": os.path.join(ROOT, "utils", "astro_streamer"),
+        "remote_tmp": "/tmp/astro_streamer",
+        "install": "chmod +x /tmp/astro_streamer",
     },
     "libsns_imx662.so": {
         "local": os.path.join(
@@ -98,7 +98,7 @@ def main():
 
     ok = True
     for name, cfg in FILES.items():
-        if only_binary and name != "waybeam_test":
+        if only_binary and name != "astro_streamer":
             continue
         ok = upload(ssh, transport, name, cfg, only_binary) and ok
 
@@ -110,12 +110,12 @@ def main():
     print(" 2) Verificar el knob del kernel:")
     print("      ls /sys/module/open_sys_config/parameters/sns0_clk_hz")
     print(" 3) Config waybeam (4 lanes, 37.125 MHz):")
-    print("      /tmp/waybeam_test --lanes 4 --mclk-hz 37125000 \\")
+    print("      /tmp/astro_streamer --lanes 4 --mclk-hz 37125000 \\")
     print("          --incksel 0x01 --datarate 0x03 --lanemode 0x03 --bench 10")
     print("    luego con TCP:")
-    print("      /tmp/waybeam_test --lanes 4 --port 5999")
+    print("      /tmp/astro_streamer --lanes 4 --port 5999")
     print(" 4) Config validada (1 lane, 27 MHz):")
-    print("      /tmp/waybeam_test --preset validated --bench 10")
+    print("      /tmp/astro_streamer --preset validated --bench 10")
     print(" 5) El knodb de 37.125 MHz se puede probar a mano:")
     print("      echo 37125000 > /sys/module/open_sys_config/parameters/sns0_clk_hz")
     print("      echo 27000000 > /sys/module/open_sys_config/parameters/sns0_clk_hz")

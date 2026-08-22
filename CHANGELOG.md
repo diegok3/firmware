@@ -39,7 +39,7 @@ display); requiere probar en el GUI del PC.
 **Cambió:** El botón CONFIG/tecla 'm' de `recv_astro.py` no conmutaba el modo en
 runtime: la pantalla seguía diciendo "H265" y la imagen no cambiaba.
 
-**Diagnóstico:** El streamer (`waybeam_test`) SÍ conmuta (verificado: cliente nuevo
+**Diagnóstico:** El streamer (`astro_streamer`) SÍ conmuta (verificado: cliente nuevo
 post-switch recibe `AS` en RAW / `WB` en H265). El bug era del **viewer + conexión
 persistente**:
 1. `read_frame()` (recv_astro.py:189) devuelve `None` ante cualquier magic de 2 bytes
@@ -51,7 +51,7 @@ persistente**:
    default es H265 → el primer `toggle_mode()` enviaba `MODE h265` (no-op) por desync.
 
 **Resuelto:**
-- `waybeam_test.c`: `switch_mode()` ahora setea `g_kick_client=1`; el data loop cierra
+- `astro_streamer.c`: `switch_mode()` ahora setea `g_kick_client=1`; el data loop cierra
   el cliente de datos activo al completar el switch → fuerza reconnect limpio del viewer
   (evita el desalineo de parseo).
 - `recv_astro.py`: `_reader_thread()` ahora **reconecta solo** si la conexión cae
@@ -72,7 +72,7 @@ cambiar de modo (server kick) o se re-sincroniza (client reconnect).
 
 ## 2026-08-22 — GANANCIA RESUELTA + ctrl responde por socket
 
-**Cambió:** Investigación a fondo del registro de ganancia IMX662 en `waybeam_test.c`.
+**Cambió:** Investigación a fondo del registro de ganancia IMX662 en `astro_streamer.c`.
 
 **Hallazgos (verificados por readback I2C en device):**
 1. **Registro de ganancia combinado** = `0x3070` (LSB) / `0x3071` (MSB, bits 10:8) =
@@ -100,13 +100,13 @@ del fixup: writes/desired/cur/ae_enabled).
 porque (a) se miraba el registro equivocado (`0x306C`) y (b) en H265 el ISP pisa `0x3070`.
 En RAW (el caso astro) la ganancia SIEMPRE funcionó.
 
-**Binary:** `ff12974ee00539d852988a8ba41cb3e8` (waybeam_test, con ctrl_send + W/F + fixup).
+**Binary:** `ff12974ee00539d852988a8ba41cb3e8` (astro_streamer, con ctrl_send + W/F + fixup).
 
 ---
 
 ## 2026-08-21 (tarde) — H265 ahora reporta exposición en el header (igual que RAW)
 
-**Cambió:** Extendido el header WB de 12→**28 bytes** en `waybeam_test.c` (campos
+**Cambió:** Extendido el header WB de 12→**28 bytes** en `astro_streamer.c` (campos
 `exp_us/again/dgain/vmax` rellenados con `ss_mpi_isp_query_exposure_info` en cada frame,
 espejo del header AS RAW). `recv_astro.py` lo parsea: el HUD H265 ahora muestra
 `E=…us A=… D=…` y la tarjeta FITS `EXPTIME` es correcta (antes `0`).
@@ -120,10 +120,10 @@ sig_handler / data_loop ENTER-EXIT — limpiar antes de cerrar).
 
 ---
 
-## 2026-08-21 — waybeam_test consolidado: RAW+H265 verificado FUNCIONAL (white = saturación, no bug)
+## 2026-08-21 — astro_streamer consolidado: RAW+H265 verificado FUNCIONAL (white = saturación, no bug)
 
 **Cambió:** Conslidación de `astro_streamer` (modo RAW astrofoto, control de exposición/
-ganancia, FITS, header AS-48B) en `waybeam_test.c`. Path RAW usa `init_sensor_full()`
+ganancia, FITS, header AS-48B) en `astro_streamer.c`. Path RAW usa `init_sensor_full()`
 (tablas portadas de astro) + `sensor_mclk_reset()`; path H265 usa el lib
 (`sensor_setup`+`isp_setup`). Conmutación runtime `MODE raw|h265` por ctrl 5998.
 
@@ -157,7 +157,7 @@ ganancia, FITS, header AS-48B) en `waybeam_test.c`. Path RAW usa `init_sensor_fu
   pipeline (ffprobe/hevc 30fps), no la imagen; la imagen era saturada igual.
 
 **Verificado en device (2026-08-21, post-reboot limpio):**
-- `waybeam_test --preset validated --mode raw --bench 8` → I2C 149 ok 0 fail, sensor
+- `astro_streamer --preset validated --mode raw --bench 8` → I2C 149 ok 0 fail, sensor
   `30DC=32 3000=00 3014=03 3015=05 30B0=00`, ~30fps (179 frames/6s).
 - TCP RAW: header "AS" 48B + 3110400 bytes/frame recibidos completos en PC.
 - `/proc/umap/mipi_rx`: frames válidos, sin CRC errors → **pipeline FUNCIONAL**.
@@ -240,7 +240,7 @@ la pena. Root cause definitiva:**
   frames (era la causa del VENC timeout histórico).
 
 **Decisión:** NO hacer el experimento LD_PRELOAD para forzar offline en majestic. El
-pipeline que funciona y es mantenible es **waybeam_test (VI-offline + ISP + VPSS + VENC
+pipeline que funciona y es mantenible es **astro_streamer (VI-offline + ISP + VPSS + VENC
 H.265 a 30fps)**. majestic queda descartado para siempre en este SoC.
 
 **Lección:** Antes de revivir un binario cerrado, verificar en disassembly si el modo
@@ -260,12 +260,12 @@ de pipeline (online vs offline) es configurable. Este MPP es offline-only de fá
 | MMZ | 32MB (pools default 29MB + VENC recon NO cabían) | 64MB (default pools + VENC caben) |
 | Sin mapear | 64MB | 0 |
 
-**VERIFICADO en device:** bench `waybeam_test --offline --preset validated --bench 10`
+**VERIFICADO en device:** bench `astro_streamer --offline --preset validated --bench 10`
 con **pools default (sin `--raw-blk/--yuv-blk`)**: init todo OK (sin `ILLEGAL_PARAM`),
 **300 frames @ 29.9fps**, teardown limpio (`sys_exit=0x0`). Ya NO hace falta reducir pools.
 
 **También se verificó el control de exposición end-to-end** (comando `X <reghex>` de
-readback I2C añadido al canal de control de waybeam_test):
+readback I2C añadido al canal de control de astro_streamer):
 - `E 300` → SHR (0x3050) = **0x0B** (11 líneas ≈293µs) ✓
 - `E 30000` → SHR = **0x0465** (1125 líneas ≈30ms) ✓
 - El registro del sensor cambia correctamente con la orden → el canal AE (MANUAL) funciona
@@ -322,10 +322,10 @@ es **VI-offline** (VI→VB→VPSS→VENC), que funciona perfecto a 30fps con ISP
 (online NOT_PERM). No es regresión — es la limitación de VI-online documentada arriba.
 
 **Entregables actualizados:**
-- `utils/waybeam_test.c` + binario (md5 a5dc3ace87f1f3ed783f71b9c35a23ee) — compilado SIN
+- `utils/astro_streamer.c` + binario (md5 a5dc3ace87f1f3ed783f71b9c35a23ee) — compilado SIN
   libaiisp/libsvp_acl (link mínimo: ss_mpi, isp, ae, awb, ot_mpi_isp, blobs AI, sysmem,
   sysbind, ot_osal, securec).
-- `utils/deploy_waybeam_test.py` — deploy binario + lib completa + .ko con knob.
+- `utils/deploy_astro_streamer.py` — deploy binario + lib completa + .ko con knob.
 - `docs/parches/PATCH_SNS0_CLK_HZ.md` + `.patch` — knob kernel persistente (VERIFICADO).
 - Knob desplegado en device: `/sys/module/open_sys_config/parameters/sns0_clk_hz`
   (backup del .ko original en `/tmp/open_sys_config.ko.bak`).

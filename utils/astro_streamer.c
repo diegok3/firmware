@@ -1,5 +1,5 @@
 /*
- * waybeam_test.c — port del pipeline waybeam_venc al firmware del usuario.
+ * astro_streamer.c — port del pipeline waybeam_venc al firmware del usuario.
  *
  * Reproduce el pipeline HARDWARE-VERIFICADO de waybeam (mismo módulo
  * SIP-K662C6S + Hi3516CV610): MIPI completo (con ENABLE_MIPI_CLOCK),
@@ -17,19 +17,19 @@
  *   SDK=../output/host/opt/ext-toolchain/sdk
  *   CC=../output/host/bin/arm-openipc-linux-musleabi-gcc
  *   KO=../output/build/hisilicon-opensdk-ff20187b/kernel/include/hi3516cv6xx
- *   $CC -O2 -o waybeam_test waybeam_test.c \
+ *   $CC -O2 -o astro_streamer astro_streamer.c \
  *     -I$SDK/include -I$KO -I$KO/exp_inc -I$KO/isp_ext_inc \
  *     -L$SDK/lib -Wl,-rpath,$SDK/lib \
  *     -lss_mpi -lss_mpi_isp -lss_mpi_ae -lss_mpi_awb -lot_mpi_isp \
  *     -lss_mpi_sysmem -lss_mpi_sysbind -lot_osal -lsecurec -lpthread -ldl -lm
  *
  * Uso (device, tras reboot limpio y carga de módulos con imx662):
- *   /tmp/waybeam_test --lanes 4 --mclk-hz 37125000 --incksel 0x01 \
+ *   /tmp/astro_streamer --lanes 4 --mclk-hz 37125000 --incksel 0x01 \
  *       --datarate 0x03 --lanemode 0x03 --port 5999
  *   # config validada (1 lane/27MHz) para comparar:
- *   /tmp/waybeam_test --preset validated --port 5999
+ *   /tmp/astro_streamer --preset validated --port 5999
  *   # solo medir fps de encoder (sin TCP), 10 seg:
- *   /tmp/waybeam_test --lanes 4 --bench 10
+ *   /tmp/astro_streamer --lanes 4 --bench 10
  *
  * Receiver (PC):
  *   recv_wb.py — header 12B: [0..1]='WB', [2..3]=flags LE, [4..7]=len LE,
