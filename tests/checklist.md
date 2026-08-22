@@ -86,3 +86,22 @@ Conectarse al streamer y enviar `G <reg>` (imprime a stderr en /tmp/astro.log):
 - [ ] `G 3015` → 0x05 (DATARATE_SEL 891Mbps)
 - [ ] `G 30B0` → 0x00 (test pattern OFF)
 - [ ] `G 3000` → 0x00 (streaming)
+
+## 8. Experimento waybeam-venc (VI + VENC H265) — 2026-08-16 (VERIFICADO)
+
+Pre-requisito: deploy + reboot (`utils/deploy_waybeam_test.py`).
+
+- [x] Knob kernel presente: `ls /sys/module/open_sys_config/parameters/sns0_clk_hz` → **OK**
+- [x] **MCLK 37.125MHz real**: bench 4 lanes sin knob → 21.9fps (27MHz real);
+      4 lanes con `--mclk-hz 37125000` → **30.0fps** (0x8010 → 37.125MHz real) — **OK**
+- [x] **4 lanes cableados**: config waybeam (4 lanes/37.125MHz) → frames por TCP (header "WB") — **OK**
+- [x] **VENC con VI-offline**: `cur_packs>0`, frames H265 AnnexB por TCP,
+      ffprobe → `hevc Main 1920x1080 30/1` — **OK**
+- [x] Readback override sensor: `readback: 0x3014=0x01 0x3015=0x03 0x3040=0x03` — **OK**
+- [x] SIGTERM limpio (select-based accept) → teardown sin panic — **OK**
+- [x] Comparar config validada: `--preset validated --bench 10` → 30.0fps (igual que astro) — **OK**
+- [ ] ⚠️ VI-ONLINE NO SOPORTADO: `ss_mpi_sys_set_vi_vpss_mode` → `0xa002800d`
+      (OT_ERR_NOT_PERM, atributo estático → OFFLINE). **Siempre usar `--offline`.**
+
+**Resultado:** pipeline completo (VI + ISP 3A + VPSS + VENC H.265) verificado a
+**30fps** en VI-offline con ambas configs (1-lane/27MHz y 4-lane/37.125MHz).

@@ -54,11 +54,27 @@
 #include "ot_common_vb.h"
 #include "ot_common_video.h"
 #include "ot_common_sys.h"
+#include "ot_common_vpss.h"
+#include "ot_common_venc.h"
+#include "ot_common_isp.h"
+#include "ot_common_3a.h"
 #include "ot_mipi_rx.h"
 #include "ot_i2c.h"
+#include "ot_sns_ctrl.h"
 #include "ot_mpi_vi.h"
 #include "ot_mpi_vb.h"
 #include "ot_mpi_sys.h"
+#include "ss_mpi_vi.h"
+#include "ss_mpi_vb.h"
+#include "ss_mpi_sys.h"
+#include "ss_mpi_vpss.h"
+#include "ss_mpi_venc.h"
+#include "ss_mpi_sys_bind.h"
+#include "ss_mpi_isp.h"
+#include "ss_mpi_ae.h"
+#include "ss_mpi_awb.h"
+#include <dlfcn.h>
+#include <pthread.h>
 
 #define VI_DEV_ID       0
 #define VI_PIPE_ID      0
@@ -69,7 +85,22 @@
 #define IMG_W_STRIDE    ((IMG_WIDTH * 12 + 127) / 128 * 128 / 8)
 #define RAW12_BUF_SIZE  (IMG_W_STRIDE * IMG_HEIGHT)
 #define TCP_PORT        5000
+#define CTRL_PORT       5998
 #define HEADER_SIZE     48
+#define WB_HDR_LEN      12
+#define WB_MAGIC0       'W'
+#define WB_MAGIC1       'B'
+
+/* H.265 mode pipeline ids */
+#define VPSS_GRP        0
+#define VPSS_CHN        0
+#define VENC_CHN        0
+#define SNS_LIB_PATH    "/usr/lib/sensors/libsns_imx662.so"
+#define SNS_OBJ_SYMBOL  "g_sns_imx662_obj"
+#define IMX662_SNS_ID   662
+
+/* Mode selectors */
+enum { MODE_RAW = 0, MODE_H265 = 1 };
 
 /* Timing (confirmed on hardware) */
 #define PIXEL_RATE      74250000ULL
@@ -106,12 +137,33 @@ static td_u64 lines_to_us(td_u64 lines) { return (lines * 80) / 3; }
 
 static int g_i2c_fd = -1;
 static volatile int g_running = 1;
+static volatile int g_switching = 0;   /* switch_mode() en curso: no contar fallos VI */
 static int g_incksel = 0x03;
 static int g_datarate = 0x05;
+static int g_lanemode = 0x00;
 static int g_sweep = 0;
 static int g_bench = 0;
 static int g_vc_num = 0;
 static int g_shrconv = 1;   /* Sony convention: SHR = VMAX - exposure (V4L2 ref) */
+static int g_mode = MODE_RAW;
+static int g_ctrl_port = CTRL_PORT;
+
+/* H.265 / ISP state (only used in MODE_H265) */
+static void *g_sns_handle = NULL;
+static ot_isp_sns_obj *g_sns_obj = NULL;
+static ot_isp_3a_alg_lib g_ae_lib = { .id = VI_PIPE_ID, .lib_name = "ot_ae_lib" };
+static ot_isp_3a_alg_lib g_awb_lib = { .id = VI_PIPE_ID, .lib_name = "ot_awb_lib" };
+static pthread_t g_isp_thread;
+static int g_isp_thread_ok = 0;
+static volatile int g_manual_ae = 0;
+static td_u32 g_man_exp_us = 10000;
+static td_u32 g_man_again = 1024;
+static td_u32 g_man_dgain = 1024;
+static td_u32 g_max_exp_us = 33333;
+static uint64_t g_h265_frames = 0, g_h265_bytes = 0, g_h265_idr = 0;
+static pthread_t g_ctrl_thread;
+static int g_ctrl_thread_arg = CTRL_PORT;
+static int g_bitrate_kbps = 4000;
 
 static td_u64 now_us(void);
 
@@ -375,20 +427,76 @@ static td_s32 init_sensor_full(void)
     return (fail == 0 && fail2 == 0) ? 0 : -1;
 }
 
+#define SNS0_CLK_HZ_PATH "/sys/module/open_sys_config/parameters/sns0_clk_hz"
+
+/* Fija el MCLK del sensor via knob del kernel (parity waybeam_test).
+   CRITICO tras cold boot: sin esto el MCLK queda mal y el VI recibe
+   frame blanco f0 0f ff (bug 2026-08-10). MCLK de la placa = 27MHz. */
+static void sensor_clock_select(unsigned int hz)
+{
+    char buf[16];
+    int fd;
+
+    fd = open(SNS0_CLK_HZ_PATH, O_WRONLY);
+    if (fd < 0) {
+        if (errno == ENOENT) {
+            fprintf(stderr, "  WARNING: %s absent (kernel sin knob) — MCLK "
+                    "queda como cargo el loader\n", SNS0_CLK_HZ_PATH);
+            return;
+        }
+        fprintf(stderr, "  FAIL open %s: %s\n", SNS0_CLK_HZ_PATH, strerror(errno));
+        return;
+    }
+    int len = snprintf(buf, sizeof(buf), "%u", hz);
+    if (len < 0 || (size_t)len >= sizeof(buf) || write(fd, buf, (size_t)len) != len) {
+        fprintf(stderr, "  FAIL set sensor clock %u Hz: %s\n", hz, strerror(errno));
+    } else {
+        fprintf(stderr, "  sensor clock %u Hz set\n", hz);
+    }
+    close(fd);
+}
+
 static td_s32 enable_mclk_and_reset_sensor(void)
 {
+    /* Secuencia MIPI completa, parity waybeam_test: enable_mipi_clock es
+       REQUERIDO (fix bug 2026-08-10 frame blanco f0 0f ff tras reboot).
+       Secuencia driver de resume: hs_mode -> disable_mipi_clk -> reset_mipi
+       -> disable_sensor_clk -> reset_sensor -> set_dev_attr -> enable_mipi_clk
+       -> unreset_mipi -> enable_sensor_clk -> unreset_sensor. */
     td_s32 fd;
     lane_divide_mode_t lane_mode = LANE_DIVIDE_MODE_0;
     sns_clk_source_t clk_source = 0;
     sns_rst_source_t rst_source = 0;
+    combo_dev_t dev = 0;
 
     fd = open("/dev/ot_mipi_rx", O_RDWR);
     if (fd < 0) return -1;
 
     ioctl(fd, OT_MIPI_SET_HS_MODE, &lane_mode);
-    ioctl(fd, OT_MIPI_ENABLE_SENSOR_CLOCK, &clk_source);
+    ioctl(fd, OT_MIPI_DISABLE_MIPI_CLOCK, &dev);
+    ioctl(fd, OT_MIPI_RESET_MIPI, &dev);
+    ioctl(fd, OT_MIPI_DISABLE_SENSOR_CLOCK, &clk_source);
     ioctl(fd, OT_MIPI_RESET_SENSOR, &rst_source);
-    usleep(10000);
+    {
+        combo_dev_attr_t dev_attr;
+        memset(&dev_attr, 0, sizeof(dev_attr));
+        dev_attr.devno = 0;
+        dev_attr.input_mode = INPUT_MODE_MIPI;
+        dev_attr.data_rate = MIPI_DATA_RATE_X1;
+        dev_attr.img_rect.width = IMG_WIDTH;
+        dev_attr.img_rect.height = IMG_HEIGHT;
+        dev_attr.mipi_attr.input_data_type = DATA_TYPE_RAW_12BIT;
+        dev_attr.mipi_attr.wdr_mode = OT_MIPI_WDR_MODE_NONE;
+        dev_attr.mipi_attr.lane_id[0] = 0;
+        dev_attr.mipi_attr.lane_id[1] = -1;
+        dev_attr.mipi_attr.lane_id[2] = -1;
+        dev_attr.mipi_attr.lane_id[3] = -1;
+        ioctl(fd, OT_MIPI_SET_DEV_ATTR, &dev_attr);
+    }
+    ioctl(fd, OT_MIPI_ENABLE_MIPI_CLOCK, &dev);
+    ioctl(fd, OT_MIPI_UNRESET_MIPI, &dev);
+    ioctl(fd, OT_MIPI_ENABLE_SENSOR_CLOCK, &clk_source);
+    sensor_clock_select(27000000);
     ioctl(fd, OT_MIPI_UNRESET_SENSOR, &rst_source);
     /* V4L2 ref: imx662_XCLR_MIN_DELAY_US = 500000 (sensor internal
        calibration after XCLR deassert before capture). */
@@ -579,148 +687,49 @@ static void process_command(const char *cmd)
         td_u16 reg = (td_u16)strtol(cmd + 2, NULL, 0);
         fprintf(stderr, "  Read 0x%04X = 0x%02X\n", reg, i2c_read_reg(reg));
     } else if (cmd[0] == '?') {
-        fprintf(stderr, "  E=%u VMAX=%u A=%u D=%u TYPE=%s OBJ=%s\n",
-                g_exposure_lines, g_vmax, g_again, g_dgain, g_frame_type, g_object);
+        fprintf(stderr, "  E=%u VMAX=%u A=%u D=%u TYPE=%s OBJ=%s MODE=%s\n",
+                g_exposure_lines, g_vmax, g_again, g_dgain, g_frame_type, g_object,
+                g_mode == MODE_H265 ? "H265" : "RAW");
     }
 }
 
-int main(int argc, char *argv[])
+/* =====================================================================
+ * Modo H.265: VI + ISP 3A (libsns_imx662.so) + VPSS + VENC.
+ * Pipeline portado de waybeam_test.c (verificado a 30fps en device).
+ * ===================================================================== */
+
+#define CHECK(r) do { if ((r) != TD_SUCCESS) { \
+    fprintf(stderr, "FAIL %s line %d: 0x%x\n", __func__, __LINE__, (r)); \
+    return -1; } } while (0)
+
+#define CHECK_OR_BUSY(r) do { \
+    td_s32 _r = (r); \
+    if (_r != TD_SUCCESS && (_r & 0x1fff) != OT_ERR_BUSY) { \
+        fprintf(stderr, "FAIL %s line %d: 0x%x\n", __func__, __LINE__, _r); \
+        return -1; } } while (0)
+
+static void *isp_thread_fn(void *arg)
 {
-    td_s32 ret;
-    int port = TCP_PORT;
-    ot_vb_pool pool = OT_VB_INVALID_POOL_ID;
+    (void)arg;
+    td_s32 r = ss_mpi_isp_run(VI_PIPE_ID);
+    fprintf(stderr, "[isp] ss_mpi_isp_run returned 0x%x\n", r);
+    return NULL;
+}
 
-    int bench_seconds = 10;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--bench") == 0) g_bench = 1;
-        else if (strncmp(argv[i], "--bench=", 8) == 0) { g_bench = 1; bench_seconds = atoi(argv[i] + 8); }
-        else if (strcmp(argv[i], "--sweep") == 0) g_sweep = 1;
-        else if (strncmp(argv[i], "--incksel=", 10) == 0) g_incksel = (int)strtol(argv[i] + 10, NULL, 0);
-        else if (strncmp(argv[i], "--datarate=", 11) == 0) g_datarate = (int)strtol(argv[i] + 11, NULL, 0);
-        else if (strncmp(argv[i], "--vc=", 5) == 0) g_vc_num = (int)strtol(argv[i] + 5, NULL, 0);
-        else if (strncmp(argv[i], "--shrconv=", 10) == 0) g_shrconv = (int)strtol(argv[i] + 10, NULL, 0);
-    }
-    if (argc > 1 && argv[1][0] != '-') port = atoi(argv[1]);
-    if (port <= 0) port = TCP_PORT;
-
-    fprintf(stderr, "=== ASTRO Streamer (port %d) ===\n", port);
-
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGINT, sig_handler);
-    signal(SIGTERM, sig_handler);
-
-    fprintf(stderr, "[0] MPI init...\n");
-    ret = ot_mpi_sys_init();
-    if (ret != TD_SUCCESS) {
-        fprintf(stderr, "  sys_init 0x%x, cleaning...\n", ret);
-        ot_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
-        ot_mpi_vi_stop_pipe(VI_PIPE_ID);
-        ot_mpi_vi_destroy_pipe(VI_PIPE_ID);
-        ot_mpi_vi_disable_dev(VI_DEV_ID);
-        ot_mpi_sys_exit();
-        usleep(500000);
-        ret = ot_mpi_sys_init();
-        if (ret != TD_SUCCESS) {
-            fprintf(stderr, "  sys_init FAILED: 0x%x\n", ret);
-            return 1;
-        }
-    }
-    fprintf(stderr, "  OK\n");
-
-    fprintf(stderr, "[2] VB init...\n");
-    ret = ot_mpi_vb_exit();
-    fprintf(stderr, "  vb_exit: 0x%x\n", ret);
-    usleep(50000);
-    ot_vb_cfg vb_cfg;
-    memset(&vb_cfg, 0, sizeof(vb_cfg));
-    vb_cfg.max_pool_cnt = 1;
-    vb_cfg.common_pool[0].blk_size = RAW12_BUF_SIZE;
-    vb_cfg.common_pool[0].blk_cnt = 6;
-    vb_cfg.common_pool[0].remap_mode = OT_VB_REMAP_MODE_NONE;
-    strncpy(vb_cfg.common_pool[0].mmz_name, "anonymous", sizeof(vb_cfg.common_pool[0].mmz_name) - 1);
-    ret = ot_mpi_vb_set_cfg(&vb_cfg);
-    fprintf(stderr, "  set_cfg: 0x%x\n", ret);
-    ret = ot_mpi_vb_init();
-    fprintf(stderr, "  init: 0x%x\n", ret);
-
-    fprintf(stderr, "[3] VB pool...\n");
-    /* Use the common pool created by vb_init for the VI module (no user pool). */
-    ot_vb_common_pools_id pools_id;
-    memset(&pools_id, 0, sizeof(pools_id));
-    ret = ot_mpi_vb_get_common_pool_id(&pools_id);
-    fprintf(stderr, "  get_common_pool_id: 0x%x cnt=%u id[0]=%u\n",
-            ret, pools_id.pool_cnt,
-            pools_id.pool_cnt > 0 ? pools_id.pool[0] : (ot_vb_pool)-1);
-    if (pools_id.pool_cnt == 0) {
-        ot_vb_pool_cfg pool_cfg;
-        memset(&pool_cfg, 0, sizeof(pool_cfg));
-        pool_cfg.blk_size = RAW12_BUF_SIZE;
-        pool_cfg.blk_cnt = 6;
-        pool_cfg.remap_mode = OT_VB_REMAP_MODE_NONE;
-        strncpy(pool_cfg.mmz_name, "anonymous", sizeof(pool_cfg.mmz_name) - 1);
-        pool = ot_mpi_vb_create_pool(&pool_cfg);
-        if (pool == OT_VB_INVALID_POOL_ID) { fprintf(stderr, "  create_pool FAILED\n"); goto cleanup; }
-        fprintf(stderr, "  create_pool=%u\n", pool);
-    }
-    ret = ot_mpi_vb_init_mod_common_pool(OT_VB_UID_VI);
-    fprintf(stderr, "  init_mod_common_pool(VI): 0x%x\n", ret);
-
-    fprintf(stderr, "[4] VI-VPSS mode...\n");
-    ot_vi_vpss_mode vpss_mode;
-    memset(&vpss_mode, 0, sizeof(vpss_mode));
-    for (int i = 0; i < 4; i++) vpss_mode.mode[i] = OT_VI_OFFLINE_VPSS_OFFLINE;
-    ot_mpi_sys_set_vi_vpss_mode(&vpss_mode);
-
-    fprintf(stderr, "[5] MCLK + sensor...\n");
-    enable_mclk_and_reset_sensor();
-
-    fprintf(stderr, "[5b] MIPI RX...\n");
-    int mipi_fd = open("/dev/ot_mipi_rx", O_RDWR);
-    if (mipi_fd >= 0) {
-        combo_dev_attr_t dev_attr;
-        memset(&dev_attr, 0, sizeof(dev_attr));
-        dev_attr.devno = 0;
-        dev_attr.input_mode = INPUT_MODE_MIPI;
-        dev_attr.data_rate = MIPI_DATA_RATE_X1;
-        dev_attr.img_rect.width = IMG_WIDTH;
-        dev_attr.img_rect.height = IMG_HEIGHT;
-        dev_attr.mipi_attr.input_data_type = DATA_TYPE_RAW_12BIT;
-        dev_attr.mipi_attr.wdr_mode = OT_MIPI_WDR_MODE_NONE;
-        dev_attr.mipi_attr.lane_id[0] = 0;
-        dev_attr.mipi_attr.lane_id[1] = -1;
-        dev_attr.mipi_attr.lane_id[2] = -1;
-        dev_attr.mipi_attr.lane_id[3] = -1;
-        ioctl(mipi_fd, OT_MIPI_SET_DEV_ATTR, &dev_attr);
-        combo_dev_t devno = 0;
-        ioctl(mipi_fd, OT_MIPI_UNRESET_MIPI, &devno);
-        usleep(10000);
-        close(mipi_fd);
-    }
-
-    fprintf(stderr, "[6] Sensor I2C...\n");
-    g_i2c_fd = open("/dev/i2c-0", O_RDWR);
-    if (g_i2c_fd >= 0) {
-        ret = ioctl(g_i2c_fd, OT_I2C_SLAVE_FORCE, (I2C_DEV_ADDR >> 1));
-        if (ret < 0) { fprintf(stderr, "  I2C fail\n"); close(g_i2c_fd); g_i2c_fd = -1; }
-        else {
-            unsigned char rid_reg[2] = {0x30, 0xDC};
-            unsigned char rid_val = 0;
-            write(g_i2c_fd, rid_reg, 2);
-            read(g_i2c_fd, &rid_val, 1);
-            fprintf(stderr, "  Chip ID=0x%02X\n", rid_val);
-            if (init_sensor_full() == 0) fprintf(stderr, "  Sensor OK\n");
-        }
-    }
-    usleep(200000);
-
-    fprintf(stderr, "[7-9] VI pipeline...\n");
-    ot_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
-    ot_mpi_vi_stop_pipe(VI_PIPE_ID);
-    ot_mpi_vi_unbind(VI_DEV_ID, VI_PIPE_ID);
-    ot_mpi_vi_disable_dev(VI_DEV_ID);
-    usleep(50000);
-
+/* VI raw (ISP bypass). pipe isp_bypass=TRUE, chn bayer 12bpp. */
+static int vi_setup_raw(void)
+{
     ot_vi_dev_attr dev_attr;
+    ot_vi_pipe_attr pipe_attr;
+    ot_vi_chn_attr chn_attr;
+
+    ss_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
+    ss_mpi_vi_stop_pipe(VI_PIPE_ID);
+    ss_mpi_vi_destroy_pipe(VI_PIPE_ID);
+    ss_mpi_vi_unbind(VI_DEV_ID, VI_PIPE_ID);
+    ss_mpi_vi_disable_dev(VI_DEV_ID);
+    usleep(50000);
+
     memset(&dev_attr, 0, sizeof(dev_attr));
     dev_attr.intf_mode = OT_VI_INTF_MODE_MIPI;
     dev_attr.work_mode = OT_VI_WORK_MODE_MULTIPLEX_1;
@@ -730,14 +739,10 @@ int main(int argc, char *argv[])
     dev_attr.in_size.height = IMG_HEIGHT;
     dev_attr.data_rate = OT_DATA_RATE_X1;
     dev_attr.component_mask[0] = 0xFFF0000;
-    ret = ot_mpi_vi_set_dev_attr(VI_DEV_ID, &dev_attr);
-    if (ret != TD_SUCCESS) { fprintf(stderr, "  set_dev_attr: 0x%x\n", ret); goto cleanup; }
-    ret = ot_mpi_vi_enable_dev(VI_DEV_ID);
-    if (ret != TD_SUCCESS) { fprintf(stderr, "  enable_dev: 0x%x\n", ret); goto cleanup; }
-    ret = ot_mpi_vi_bind(VI_DEV_ID, VI_PIPE_ID);
-    if (ret != TD_SUCCESS) { fprintf(stderr, "  bind: 0x%x\n", ret); goto cleanup; }
+    CHECK(ss_mpi_vi_set_dev_attr(VI_DEV_ID, &dev_attr));
+    CHECK(ss_mpi_vi_enable_dev(VI_DEV_ID));
+    CHECK(ss_mpi_vi_bind(VI_DEV_ID, VI_PIPE_ID));
 
-    ot_vi_pipe_attr pipe_attr;
     memset(&pipe_attr, 0, sizeof(pipe_attr));
     pipe_attr.isp_bypass = TD_TRUE;
     pipe_attr.size.width = IMG_WIDTH;
@@ -746,19 +751,9 @@ int main(int argc, char *argv[])
     pipe_attr.compress_mode = OT_COMPRESS_MODE_NONE;
     pipe_attr.frame_rate_ctrl.src_frame_rate = -1;
     pipe_attr.frame_rate_ctrl.dst_frame_rate = -1;
-    ot_mpi_vi_stop_pipe(VI_PIPE_ID);
-    ot_mpi_vi_create_pipe(VI_PIPE_ID, &pipe_attr);
-    ot_mpi_vi_set_pipe_attr(VI_PIPE_ID, &pipe_attr);
-    {
-        td_s32 vcret = ot_mpi_vi_set_pipe_vc_number(VI_PIPE_ID, g_vc_num);
-        if (vcret != TD_SUCCESS)
-            fprintf(stderr, "  set_pipe_vc_number(%d): 0x%x\n", g_vc_num, vcret);
-        else
-            fprintf(stderr, "  vc_num set to %d\n", g_vc_num);
-    }
-    ot_mpi_vi_start_pipe(VI_PIPE_ID);
+    CHECK(ss_mpi_vi_create_pipe(VI_PIPE_ID, &pipe_attr));
+    CHECK(ss_mpi_vi_start_pipe(VI_PIPE_ID));
 
-    ot_vi_chn_attr chn_attr;
     memset(&chn_attr, 0, sizeof(chn_attr));
     chn_attr.size.width = IMG_WIDTH;
     chn_attr.size.height = IMG_HEIGHT;
@@ -769,135 +764,672 @@ int main(int argc, char *argv[])
     chn_attr.depth = 1;
     chn_attr.frame_rate_ctrl.src_frame_rate = -1;
     chn_attr.frame_rate_ctrl.dst_frame_rate = -1;
-    ot_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
-    ot_mpi_vi_set_chn_attr(VI_PIPE_ID, VI_CHN_ID, &chn_attr);
-    ret = ot_mpi_vi_enable_chn(VI_PIPE_ID, VI_CHN_ID);
-    if (ret != TD_SUCCESS) { fprintf(stderr, "  enable_chn: 0x%x\n", ret); goto cleanup; }
-    fprintf(stderr, "  VI OK\n");
+    CHECK(ss_mpi_vi_set_chn_attr(VI_PIPE_ID, VI_CHN_ID, &chn_attr));
+    CHECK(ss_mpi_vi_enable_chn(VI_PIPE_ID, VI_CHN_ID));
+    fprintf(stderr, "  VI RAW (isp_bypass) OK\n");
+    return 0;
+}
 
-    if (g_bench) {
-        fprintf(stderr, "[10] BENCH mode: measuring frame rate for %ds...\n", bench_seconds);
-        fflush(stderr);
+/* VI con ISP activo (para modo H.265): pipe isp_bypass=FALSE, chn YUV420. */
+static int vi_setup_h265(void)
+{
+    ot_vi_dev_attr dev_attr;
+    ot_vi_pipe_attr pipe_attr;
+    ot_vi_chn_attr chn_attr;
 
-        struct timeval t_start, t_now;
-        gettimeofday(&t_start, NULL);
-        int frames = 0, errors = 0;
+    ss_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
+    ss_mpi_vi_stop_pipe(VI_PIPE_ID);
+    ss_mpi_vi_destroy_pipe(VI_PIPE_ID);
+    ss_mpi_vi_unbind(VI_DEV_ID, VI_PIPE_ID);
+    ss_mpi_vi_disable_dev(VI_DEV_ID);
+    usleep(50000);
 
-        while (g_running) {
-            ot_video_frame_info frame_info;
-            memset(&frame_info, 0, sizeof(frame_info));
-            ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 3000);
-            if (ret != TD_SUCCESS) { errors++; if (errors > 30) break; continue; }
-            ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
-            frames++;
+    memset(&dev_attr, 0, sizeof(dev_attr));
+    dev_attr.intf_mode = OT_VI_INTF_MODE_MIPI;
+    dev_attr.work_mode = OT_VI_WORK_MODE_MULTIPLEX_1;
+    dev_attr.component_mask[0] = 0xFFC00000;
+    dev_attr.scan_mode = OT_VI_SCAN_PROGRESSIVE;
+    dev_attr.ad_chn_id[0] = -1;
+    dev_attr.ad_chn_id[1] = -1;
+    dev_attr.ad_chn_id[2] = -1;
+    dev_attr.ad_chn_id[3] = -1;
+    dev_attr.data_seq = OT_VI_DATA_SEQ_YUYV;
+    dev_attr.data_type = OT_VI_DATA_TYPE_RAW;
+    dev_attr.data_reverse = TD_FALSE;
+    dev_attr.in_size.width = IMG_WIDTH;
+    dev_attr.in_size.height = IMG_HEIGHT;
+    dev_attr.data_rate = OT_DATA_RATE_X1;
+    CHECK(ss_mpi_vi_set_dev_attr(VI_DEV_ID, &dev_attr));
+    CHECK(ss_mpi_vi_enable_dev(VI_DEV_ID));
+    CHECK(ss_mpi_vi_bind(VI_DEV_ID, VI_PIPE_ID));
 
-            gettimeofday(&t_now, NULL);
-            double elapsed = (t_now.tv_sec - t_start.tv_sec) +
-                             (t_now.tv_usec - t_start.tv_usec) / 1e6;
-            if (elapsed >= bench_seconds) break;
-            if (elapsed >= 2.0) {
-                fprintf(stderr, "  frames=%d in %.1fs = %.2f fps (err=%d)\n",
-                        frames, elapsed, frames / elapsed, errors);
-                fflush(stderr);
-                frames = 0; errors = 0;
-                gettimeofday(&t_start, NULL);
-            }
-        }
-        fprintf(stderr, "BENCH done.\n");
-        goto cleanup;
+    memset(&pipe_attr, 0, sizeof(pipe_attr));
+    pipe_attr.pipe_bypass_mode = OT_VI_PIPE_BYPASS_NONE;
+    pipe_attr.isp_bypass = TD_FALSE;
+    pipe_attr.size.width = IMG_WIDTH;
+    pipe_attr.size.height = IMG_HEIGHT;
+    pipe_attr.pixel_format = OT_PIXEL_FORMAT_RGB_BAYER_12BPP;
+    pipe_attr.compress_mode = OT_COMPRESS_MODE_NONE;
+    pipe_attr.frame_rate_ctrl.src_frame_rate = -1;
+    pipe_attr.frame_rate_ctrl.dst_frame_rate = -1;
+    CHECK(ss_mpi_vi_create_pipe(VI_PIPE_ID, &pipe_attr));
+    CHECK(ss_mpi_vi_start_pipe(VI_PIPE_ID));
+
+    memset(&chn_attr, 0, sizeof(chn_attr));
+    chn_attr.size.width = IMG_WIDTH;
+    chn_attr.size.height = IMG_HEIGHT;
+    chn_attr.pixel_format = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
+    chn_attr.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
+    chn_attr.video_format = OT_VIDEO_FORMAT_LINEAR;
+    chn_attr.compress_mode = OT_COMPRESS_MODE_NONE;
+    chn_attr.mirror_en = TD_FALSE;
+    chn_attr.flip_en = TD_FALSE;
+    chn_attr.depth = 0;
+    chn_attr.frame_rate_ctrl.src_frame_rate = -1;
+    chn_attr.frame_rate_ctrl.dst_frame_rate = -1;
+    CHECK(ss_mpi_vi_set_chn_attr(VI_PIPE_ID, VI_CHN_ID, &chn_attr));
+    CHECK(ss_mpi_vi_enable_chn(VI_PIPE_ID, VI_CHN_ID));
+    fprintf(stderr, "  VI ISP (YUV420) OK\n");
+    return 0;
+}
+
+static int h265_sensor_setup(void)
+{
+    ot_isp_sns_commbus bus;
+
+    g_sns_handle = dlopen(SNS_LIB_PATH, RTLD_NOW | RTLD_GLOBAL);
+    if (g_sns_handle == NULL) {
+        fprintf(stderr, "dlopen %s: %s\n", SNS_LIB_PATH, dlerror());
+        return -1;
+    }
+    g_sns_obj = (ot_isp_sns_obj *)dlsym(g_sns_handle, SNS_OBJ_SYMBOL);
+    if (g_sns_obj == NULL) {
+        fprintf(stderr, "dlsym %s: %s\n", SNS_OBJ_SYMBOL, dlerror());
+        return -1;
+    }
+    fprintf(stderr, "  dlopen %s -> %s @ %p\n", SNS_LIB_PATH, SNS_OBJ_SYMBOL,
+            (void *)g_sns_obj);
+    if (g_sns_obj->pfn_set_bus_info != NULL) {
+        bus.i2c_dev = 0;
+        CHECK(g_sns_obj->pfn_set_bus_info(VI_PIPE_ID, bus));
+    }
+    CHECK(ss_mpi_ae_register(VI_PIPE_ID, &g_ae_lib));
+    CHECK(ss_mpi_awb_register(VI_PIPE_ID, &g_awb_lib));
+    CHECK(g_sns_obj->pfn_register_callback(VI_PIPE_ID, &g_ae_lib, &g_awb_lib));
+    return 0;
+}
+
+static int h265_isp_setup(void)
+{
+    ot_isp_pub_attr pub;
+    ot_isp_bind_attr bind;
+
+    memset(&pub, 0, sizeof(pub));
+    pub.wnd_rect.x = 0;
+    pub.wnd_rect.y = 0;
+    pub.wnd_rect.width = IMG_WIDTH;
+    pub.wnd_rect.height = IMG_HEIGHT;
+    pub.sns_size.width = IMG_WIDTH;
+    pub.sns_size.height = IMG_HEIGHT;
+    pub.frame_rate = 30;
+    pub.bayer_format = (ot_isp_bayer_format)0;   /* RGGB */
+    pub.wdr_mode = OT_WDR_MODE_NONE;
+    pub.sns_mode = 0;
+
+    memset(&bind, 0, sizeof(bind));
+    bind.sns_id = IMX662_SNS_ID;
+    bind.ae_lib = g_ae_lib;
+    bind.awb_lib = g_awb_lib;
+    CHECK(ss_mpi_isp_set_bind_attr(VI_PIPE_ID, &bind));
+    CHECK(ss_mpi_isp_mem_init(VI_PIPE_ID));
+    CHECK(ss_mpi_isp_set_pub_attr(VI_PIPE_ID, &pub));
+    CHECK(ss_mpi_isp_init(VI_PIPE_ID));
+
+    /* CSC de salida (igual que waybeam): sin esto el ISP no entrega
+       YUV420 a la chn VI. */
+    {
+        ot_isp_csc_attr csc;
+        memset(&csc, 0, sizeof(csc));
+        CHECK(ss_mpi_isp_get_csc_attr(VI_PIPE_ID, &csc));
+        csc.enable = TD_TRUE;
+        csc.satu = 60;
+        csc.contr = 53;
+        CHECK(ss_mpi_isp_set_csc_attr(VI_PIPE_ID, &csc));
     }
 
-    if (g_sweep) {
-        fprintf(stderr, "[10] SWEEP mode: relocking PLL for each INCK_SEL...\n");
-        fflush(stderr);
+    /* AWB: dejamos el AWB del lib activo (parity waybeam).  El bypass
+       estático con ganancia neutra producía frame blanco puro (std=0)
+       en el H265.  waybeam sin bypass da imagen real. */
 
-        static const struct { int inc; int dr; } sweep_table[] = {
-            {0x01, 0x02}, {0x01, 0x05}, {0x02, 0x05}, {0x03, 0x05},
-            {0x04, 0x05}, {0x00, 0x05}, {0x05, 0x05}, {0x06, 0x05},
-            {0x07, 0x05}, {0x00, 0x02}, {0x02, 0x02}, {0x03, 0x02},
-            {0x04, 0x02}, {0x05, 0x02},
-        };
+    /* Override INCK/DATARATE post-init (el lib puede dejar INCK=0x01,
+       nosotros queremos 0x03/0x05).  Standby -> regs -> unstandby. */
+    i2c_write_reg(0x3000, 0x01);
+    usleep(2000);
+    i2c_write_reg(0x3014, (td_u8)g_incksel);
+    i2c_write_reg(0x3015, (td_u8)g_datarate);
+    i2c_write_reg(0x3040, (td_u8)g_lanemode);
+    i2c_write_reg(0x3000, 0x00);
+    usleep(100000);
+    i2c_write_reg(0x3001, 0x00);
+    fprintf(stderr, "  ISP init OK (CSC + INCK=%02X DR=%02X)\n",
+            (unsigned)g_incksel, (unsigned)g_datarate);
+    return 0;
+}
 
-        for (unsigned s = 0; s < sizeof(sweep_table)/sizeof(sweep_table[0]) && g_running; s++) {
-            int inc = sweep_table[s].inc;
-            int dr = sweep_table[s].dr;
+static int h265_vpss_setup(void)
+{
+    ot_vpss_grp_attr grp_attr;
+    ot_vpss_chn_attr chn_attr;
+    ot_mpp_chn src, dst;
 
-            i2c_write_reg(0x3000, 0x01);
-            usleep(50000);
-            i2c_write_reg(0x3014, (td_u8)inc);
-            i2c_write_reg(0x3015, (td_u8)dr);
-            i2c_write_reg(0x3000, 0x00);
-            usleep(200000);
+    memset(&grp_attr, 0, sizeof(grp_attr));
+    grp_attr.max_width = IMG_WIDTH;
+    grp_attr.max_height = IMG_HEIGHT;
+    grp_attr.pixel_format = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
+    grp_attr.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
+    grp_attr.dei_mode = OT_VPSS_DEI_MODE_OFF;
+    grp_attr.frame_rate.src_frame_rate = -1;
+    grp_attr.frame_rate.dst_frame_rate = -1;
+    CHECK(ss_mpi_vpss_create_grp(VPSS_GRP, &grp_attr));
 
-            struct timeval t_start, t_now;
-            gettimeofday(&t_start, NULL);
-            int frames = 0, errors = 0;
-            while (g_running) {
-                ot_video_frame_info frame_info;
-                memset(&frame_info, 0, sizeof(frame_info));
-                ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 2000);
-                if (ret != TD_SUCCESS) { errors++; continue; }
-                ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
-                frames++;
-                gettimeofday(&t_now, NULL);
-                double elapsed = (t_now.tv_sec - t_start.tv_sec) +
-                                 (t_now.tv_usec - t_start.tv_usec) / 1e6;
-                if (elapsed >= 3.0) break;
-            }
-            fprintf(stderr, "SWEEP INCK=0x%02X DR=0x%02X: %d frames in ~3s = %.2f fps (err=%d)\n",
-                    inc, dr, frames, frames / 3.0, errors);
-            fflush(stderr);
-        }
-        fprintf(stderr, "SWEEP done.\n");
-        goto cleanup;
+    memset(&chn_attr, 0, sizeof(chn_attr));
+    chn_attr.width = IMG_WIDTH;
+    chn_attr.height = IMG_HEIGHT;
+    chn_attr.pixel_format = OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420;
+    chn_attr.dynamic_range = OT_DYNAMIC_RANGE_SDR8;
+    chn_attr.video_format = OT_VIDEO_FORMAT_LINEAR;
+    chn_attr.compress_mode = OT_COMPRESS_MODE_NONE;
+    chn_attr.chn_mode = OT_VPSS_CHN_MODE_USER;
+    chn_attr.depth = 0;
+    chn_attr.frame_rate.src_frame_rate = -1;
+    chn_attr.frame_rate.dst_frame_rate = -1;
+    CHECK(ss_mpi_vpss_set_chn_attr(VPSS_GRP, VPSS_CHN, &chn_attr));
+    CHECK(ss_mpi_vpss_enable_chn(VPSS_GRP, VPSS_CHN));
+    CHECK(ss_mpi_vpss_start_grp(VPSS_GRP));
+
+    src.mod_id = OT_ID_VI;
+    src.dev_id = VI_PIPE_ID;
+    src.chn_id = VI_CHN_ID;
+    dst.mod_id = OT_ID_VPSS;
+    dst.dev_id = VPSS_GRP;
+    dst.chn_id = 0;
+    CHECK(ss_mpi_sys_bind(&src, &dst));
+    fprintf(stderr, "  VPSS OK\n");
+    return 0;
+}
+
+static int h265_venc_setup(void)
+{
+    ot_venc_chn_attr attr;
+    ot_venc_h265_vui vui;
+    ot_venc_start_param start;
+    ot_mpp_chn src, dst;
+    uint32_t gop = 60;   /* 2 s @ 30fps */
+
+    memset(&attr, 0, sizeof(attr));
+    attr.venc_attr.type = OT_PT_H265;
+    attr.venc_attr.max_pic_width = IMG_WIDTH;
+    attr.venc_attr.max_pic_height = IMG_HEIGHT;
+    attr.venc_attr.buf_size = ((IMG_WIDTH * IMG_HEIGHT * 3 / 4) + 63) & ~63u;
+    attr.venc_attr.profile = 0;
+    attr.venc_attr.is_by_frame = TD_TRUE;
+    attr.venc_attr.pic_width = IMG_WIDTH;
+    attr.venc_attr.pic_height = IMG_HEIGHT;
+    attr.venc_attr.h265_attr.rcn_ref_share_buf_en = TD_TRUE;
+    attr.venc_attr.h265_attr.frame_buf_ratio = 75;
+    attr.rc_attr.rc_mode = OT_VENC_RC_MODE_H265_CBR;
+    attr.rc_attr.h265_cbr.gop = gop;
+    attr.rc_attr.h265_cbr.stats_time = 1;
+    attr.rc_attr.h265_cbr.src_frame_rate = 30;
+    attr.rc_attr.h265_cbr.dst_frame_rate = 30;
+    attr.rc_attr.h265_cbr.bit_rate = g_bitrate_kbps;
+    attr.gop_attr.gop_mode = OT_VENC_GOP_MODE_NORMAL_P;
+    attr.gop_attr.normal_p.ip_qp_delta = 0;
+
+    CHECK(ss_mpi_venc_create_chn(VENC_CHN, &attr));
+
+    memset(&vui, 0, sizeof(vui));
+    CHECK(ss_mpi_venc_get_h265_vui(VENC_CHN, &vui));
+    vui.vui_time_info.timing_info_present_flag = 1;
+    vui.vui_time_info.num_units_in_tick = 1000;
+    vui.vui_time_info.time_scale = 30000;
+    vui.vui_time_info.num_ticks_poc_diff_one_minus1 = 0;
+    vui.vui_video_signal.video_signal_type_present_flag = 1;
+    vui.vui_video_signal.video_format = 5;
+    vui.vui_video_signal.video_full_range_flag = 1;
+    vui.vui_video_signal.colour_description_present_flag = 1;
+    vui.vui_video_signal.colour_primaries = 1;
+    vui.vui_video_signal.transfer_characteristics = 1;
+    vui.vui_video_signal.matrix_coefficients = 1;
+    CHECK(ss_mpi_venc_set_h265_vui(VENC_CHN, &vui));
+
+    memset(&start, 0, sizeof(start));
+    start.recv_pic_num = -1;
+    CHECK(ss_mpi_venc_start_chn(VENC_CHN, &start));
+
+    src.mod_id = OT_ID_VPSS;
+    src.dev_id = VPSS_GRP;
+    src.chn_id = VPSS_CHN;
+    dst.mod_id = OT_ID_VENC;
+    dst.dev_id = 0;
+    dst.chn_id = VENC_CHN;
+    CHECK(ss_mpi_sys_bind(&src, &dst));
+    fprintf(stderr, "  VENC H.265 OK\n");
+    return 0;
+}
+
+static void h265_teardown(void)
+{
+    ot_mpp_chn src = { OT_ID_VI, VI_PIPE_ID, VI_CHN_ID };
+    ot_mpp_chn dst = { OT_ID_VPSS, VPSS_GRP, 0 };
+    ot_mpp_chn vsrc = { OT_ID_VPSS, VPSS_GRP, VPSS_CHN };
+    ot_mpp_chn vdst = { OT_ID_VENC, 0, VENC_CHN };
+
+    (void)ss_mpi_sys_unbind(&vsrc, &vdst);
+    (void)ss_mpi_sys_unbind(&src, &dst);
+    (void)ss_mpi_vpss_stop_grp(VPSS_GRP);
+    (void)ss_mpi_vpss_disable_chn(VPSS_GRP, VPSS_CHN);
+    (void)ss_mpi_vpss_destroy_grp(VPSS_GRP);
+    (void)ss_mpi_venc_stop_chn(VENC_CHN);
+    (void)ss_mpi_venc_destroy_chn(VENC_CHN);
+    ss_mpi_isp_exit(VI_PIPE_ID);
+    if (g_isp_thread_ok) {
+        pthread_join(g_isp_thread, NULL);
+        g_isp_thread_ok = 0;
     }
+    if (g_sns_obj != NULL && g_sns_obj->pfn_un_register_callback != NULL)
+        g_sns_obj->pfn_un_register_callback(VI_PIPE_ID, &g_ae_lib, &g_awb_lib);
+    ss_mpi_awb_unregister(VI_PIPE_ID, &g_awb_lib);
+    ss_mpi_ae_unregister(VI_PIPE_ID, &g_ae_lib);
+    if (g_sns_handle != NULL) {
+        dlclose(g_sns_handle);
+        g_sns_handle = NULL;
+        g_sns_obj = NULL;
+    }
+}
 
-    fprintf(stderr, "[10] TCP server on port %d...\n", port);
-    fflush(stderr);
+/* Teardown VI (común a ambos modos) */
+static void vi_teardown(void)
+{
+    ss_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
+    ss_mpi_vi_stop_pipe(VI_PIPE_ID);
+    ss_mpi_vi_destroy_pipe(VI_PIPE_ID);
+    ss_mpi_vi_unbind(VI_DEV_ID, VI_PIPE_ID);
+    ss_mpi_vi_disable_dev(VI_DEV_ID);
+    usleep(200000);
+}
 
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) goto cleanup;
-    int yes = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+/* NAL H265: tipo 19 (IDR_W_RADL) o 20 (IDR_N_LP) => IDR */
+static int frame_is_idr(const uint8_t *p, size_t len)
+{
+    size_t i;
+    for (i = 0; i + 4 < len; i++) {
+        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 0 && p[i + 3] == 1) {
+            uint8_t h = p[i + 4];
+            uint8_t t = (uint8_t)((h >> 1) & 0x3F);
+            if (t == 19 || t == 20)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const uint8_t *p = buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, p + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static int tcp_listen(int port)
+{
+    int fd;
     struct sockaddr_in addr;
+    int one = 1;
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) { close(server_fd); goto cleanup; }
-    if (listen(server_fd, 1) < 0) { close(server_fd); goto cleanup; }
-    fprintf(stderr, "  Waiting for client on port %d...\n", port);
-    fflush(stderr);
+    addr.sin_port = htons((uint16_t)port);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+        listen(fd, 1) < 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
 
-    int mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
-    if (mem_fd < 0) goto cleanup;
+/* Loop H.265: lee VENC fd, concatena packs, envía header WB + AnnexB. */
+static void h265_run_loop(int sock, int bench_seconds)
+{
+    int venc_fd = ss_mpi_venc_get_fd(VENC_CHN);
+    uint64_t t0 = now_us();
+    int client = -1;
+    int bench = (bench_seconds > 0);
 
+    if (venc_fd < 0) {
+        fprintf(stderr, "  venc_get_fd FAIL\n");
+        return;
+    }
+    if (!bench)
+        fprintf(stderr, "  H.265 TCP server on port, waiting client...\n");
+
+    while (g_running) {
+        ot_venc_chn_status status;
+        ot_venc_stream stream;
+        fd_set readfds;
+        struct timeval timeout = { 1, 0 };
+        uint8_t hdr[WB_HDR_LEN];
+        td_s32 ret;
+        int ready, i, is_idr;
+
+        if (client < 0 && sock >= 0) {
+            fd_set rfds;
+            struct timeval tv = { 0, 0 };
+            int r;
+            FD_ZERO(&rfds);
+            FD_SET(sock, &rfds);
+            r = select(sock + 1, &rfds, NULL, NULL, &tv);
+            if (r > 0) {
+                client = accept(sock, NULL, NULL);
+                if (client >= 0)
+                    fprintf(stderr, "  H265 client connected\n");
+            }
+        }
+        if (bench && (now_us() - t0) > (uint64_t)bench_seconds * 1000000)
+            break;
+
+        FD_ZERO(&readfds);
+        FD_SET(venc_fd, &readfds);
+        ready = select(venc_fd + 1, &readfds, NULL, NULL, &timeout);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) break;
+        if (ready == 0) {
+            if (bench && (now_us() - t0) > (uint64_t)bench_seconds * 1000000)
+                break;
+            continue;
+        }
+
+        memset(&status, 0, sizeof(status));
+        ret = ss_mpi_venc_query_status(VENC_CHN, &status);
+        if (ret != TD_SUCCESS || status.cur_packs == 0) continue;
+
+        memset(&stream, 0, sizeof(stream));
+        stream.pack = calloc(status.cur_packs, sizeof(*stream.pack));
+        if (!stream.pack) break;
+        stream.pack_cnt = status.cur_packs;
+        ret = ss_mpi_venc_get_stream(VENC_CHN, &stream, 1000);
+        if (ret != TD_SUCCESS) {
+            free(stream.pack);
+            continue;
+        }
+
+        size_t total = 0;
+        for (i = 0; i < (int)stream.pack_cnt; i++)
+            total += stream.pack[i].len;
+        if (total == 0) {
+            ss_mpi_venc_release_stream(VENC_CHN, &stream);
+            free(stream.pack);
+            continue;
+        }
+        uint8_t *frame = malloc(total);
+        if (!frame) {
+            ss_mpi_venc_release_stream(VENC_CHN, &stream);
+            free(stream.pack);
+            break;
+        }
+        size_t off = 0;
+        for (i = 0; i < (int)stream.pack_cnt; i++) {
+            memcpy(frame + off, stream.pack[i].addr, stream.pack[i].len);
+            off += stream.pack[i].len;
+        }
+
+        is_idr = frame_is_idr(frame, total);
+        g_h265_frames++;
+        g_h265_bytes += total;
+        if (is_idr) g_h265_idr++;
+
+        if (client >= 0) {
+            hdr[0] = WB_MAGIC0;
+            hdr[1] = WB_MAGIC1;
+            hdr[2] = (uint8_t)(is_idr ? 1 : 0);
+            hdr[3] = 0;
+            hdr[4] = (uint8_t)(total & 0xFF);
+            hdr[5] = (uint8_t)((total >> 8) & 0xFF);
+            hdr[6] = (uint8_t)((total >> 16) & 0xFF);
+            hdr[7] = (uint8_t)((total >> 24) & 0xFF);
+            uint64_t pts = stream.pack_cnt ? stream.pack[0].pts : 0;
+            hdr[8] = (uint8_t)(pts & 0xFF);
+            hdr[9] = (uint8_t)((pts >> 8) & 0xFF);
+            hdr[10] = (uint8_t)((pts >> 16) & 0xFF);
+            hdr[11] = (uint8_t)((pts >> 24) & 0xFF);
+            if (write_all(client, hdr, WB_HDR_LEN) != 0 ||
+                write_all(client, frame, total) != 0) {
+                fprintf(stderr, "  H265 TCP write fail — client disconnected\n");
+                close(client);
+                client = -1;
+            }
+        }
+
+        uint64_t now = now_us();
+        if (bench && g_h265_frames % 30 == 0)
+            fprintf(stderr, "> H265 frames=%llu bytes=%llu idr=%llu fps=%.2f\n",
+                    (unsigned long long)g_h265_frames,
+                    (unsigned long long)g_h265_bytes,
+                    (unsigned long long)g_h265_idr,
+                    (double)g_h265_frames * 1000000.0 / (double)(now - t0));
+
+        ret = ss_mpi_venc_release_stream(VENC_CHN, &stream);
+        free(stream.pack);
+        free(frame);
+        if (ret != TD_SUCCESS) break;
+    }
+    if (client >= 0) close(client);
+}
+
+/* --------------------------------------------------------------------
+ * Loop de datos unificado: sirve frames en el modo actual (RAW o H.265)
+ * y se adapta en runtime si el canal de control hace MODE raw|h265.
+ * -------------------------------------------------------------------- */
+static void data_loop(int server_fd)
+{
+    int mem_fd = -1;
     int mem_mmaped = 0;
     void *mem_map = NULL;
     td_u64 mem_map_len = 0;
     td_u64 mem_map_phys = 0;
 
-    char cmd_buf[512];
-    int cmd_len = 0;
+    int cur_mode = -1;          /* fuerza re-init de recursos al primer frame */
+    int venc_fd = -1;
     td_u32 frame_index = 0;
+    td_s32 ret;
 
     while (g_running) {
         struct sockaddr_in cli_addr;
         socklen_t cli_len = sizeof(cli_addr);
-        int client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &cli_len);
-        if (client_fd < 0) continue;
+        int client_fd = -1;
+        /* accept select-based: SIGTERM (musl SA_RESTART) no interrumpe
+           accept() bloqueante -> usar select con timeout para salir limpio */
+        for (;;) {
+            fd_set rfds;
+            struct timeval tv = { 0, 200000 };
+            FD_ZERO(&rfds);
+            FD_SET(server_fd, &rfds);
+            int r = select(server_fd + 1, &rfds, NULL, NULL, &tv);
+            if (r < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (r == 0) {
+                /* Sin cliente: drenar VENC hasta vaciarlo para no acumular backlog
+                   (los frames se descartan). */
+                if (g_mode == MODE_H265) {
+                    for (int n = 0; n < 64; n++) {
+                        ot_venc_chn_status status;
+                        memset(&status, 0, sizeof(status));
+                        if (ss_mpi_venc_query_status(VENC_CHN, &status) != TD_SUCCESS ||
+                            status.cur_packs == 0) break;
+                        ot_venc_stream stream;
+                        memset(&stream, 0, sizeof(stream));
+                        stream.pack = calloc(status.cur_packs, sizeof(*stream.pack));
+                        if (!stream.pack) break;
+                        stream.pack_cnt = status.cur_packs;
+                        if (ss_mpi_venc_get_stream(VENC_CHN, &stream, 100) == TD_SUCCESS)
+                            (void)ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                        free(stream.pack);
+                    }
+                }
+                if (!g_running) break;
+                continue;
+            }
+            client_fd = accept(server_fd, (struct sockaddr *)&cli_addr, &cli_len);
+            break;
+        }
+        if (client_fd < 0) {
+            if (g_running) continue;
+            break;
+        }
 
-        fprintf(stderr, "  Client: %s\n", inet_ntoa(cli_addr.sin_addr));
+        fprintf(stderr, "  Client: %s (mode %s)\n", inet_ntoa(cli_addr.sin_addr),
+                g_mode == MODE_H265 ? "H265" : "RAW");
         fflush(stderr);
+
+        /* Cliente nuevo en H.265: no enviar frames hasta el primer
+           IDR (VPS/SPS/PPS/IDR) para que el decoder arranque limpio. */
+        int h265_wait_idr = 0;
+        if (g_mode == MODE_H265 && cur_mode == MODE_H265) {
+            h265_wait_idr = 1;
+            (void)ss_mpi_venc_request_idr(VENC_CHN, TD_TRUE);
+        }
 
         int flags = fcntl(client_fd, F_GETFL, 0);
         fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 
+        char cmd_buf[512];
+        int cmd_len = 0;
         int consecutive_fail = 0;
-        cmd_len = 0;
         g_burst_remaining = 0;
 
         while (g_running) {
+            /* --- si cambió el modo, refrescar recursos específicos --- */
+            if (cur_mode != g_mode) {
+                if (cur_mode == MODE_H265) {
+                    venc_fd = -1;
+                }
+                if (g_mode == MODE_H265) {
+                    venc_fd = ss_mpi_venc_get_fd(VENC_CHN);
+                    fprintf(stderr, "  [data] venc_fd=%d (switched to H265)\n", venc_fd);
+                    h265_wait_idr = 1;
+                    (void)ss_mpi_venc_request_idr(VENC_CHN, TD_TRUE);
+                } else {
+                    if (mem_fd < 0) mem_fd = open("/dev/mem", O_RDONLY | O_SYNC);
+                    fprintf(stderr, "  [data] mem_fd=%d (switched to RAW)\n", mem_fd);
+                }
+                cur_mode = g_mode;
+                consecutive_fail = 0;
+                fflush(stderr);
+            }
+
+            if (g_mode == MODE_H265) {
+                /* ---------- H.265: un frame VENC + header WB ---------- */
+                if (g_switching) { usleep(50000); continue; }
+                if (venc_fd < 0) { usleep(50000); continue; }
+                fd_set rfds;
+                struct timeval tv = { 1, 0 };
+                FD_ZERO(&rfds);
+                FD_SET(venc_fd, &rfds);
+                if (select(venc_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+                    if (g_running) continue;
+                    break;
+                }
+
+                ot_venc_chn_status status;
+                ot_venc_stream stream;
+                memset(&status, 0, sizeof(status));
+                if (ss_mpi_venc_query_status(VENC_CHN, &status) != TD_SUCCESS ||
+                    status.cur_packs == 0) continue;
+
+                memset(&stream, 0, sizeof(stream));
+                stream.pack = calloc(status.cur_packs, sizeof(*stream.pack));
+                if (!stream.pack) break;
+                stream.pack_cnt = status.cur_packs;
+                if (ss_mpi_venc_get_stream(VENC_CHN, &stream, 1000) != TD_SUCCESS) {
+                    free(stream.pack);
+                    continue;
+                }
+
+                size_t total = 0;
+                int i;
+                for (i = 0; i < (int)stream.pack_cnt; i++) total += stream.pack[i].len;
+                if (total == 0) {
+                    ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                    free(stream.pack);
+                    continue;
+                }
+                uint8_t *frame = malloc(total);
+                if (!frame) {
+                    ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                    free(stream.pack);
+                    break;
+                }
+                size_t off = 0;
+                for (i = 0; i < (int)stream.pack_cnt; i++) {
+                    memcpy(frame + off, stream.pack[i].addr, stream.pack[i].len);
+                    off += stream.pack[i].len;
+                }
+                int is_idr = frame_is_idr(frame, total);
+                g_h265_frames++;
+                g_h265_bytes += total;
+                if (is_idr) g_h265_idr++;
+
+                /* Esperar el primer IDR antes de enviar (arranque limpio). */
+                if (h265_wait_idr && !is_idr) {
+                    ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                    free(stream.pack);
+                    free(frame);
+                    continue;
+                }
+                h265_wait_idr = 0;
+
+                uint8_t hdr[WB_HDR_LEN];
+                hdr[0] = WB_MAGIC0; hdr[1] = WB_MAGIC1;
+                hdr[2] = (uint8_t)(is_idr ? 1 : 0); hdr[3] = 0;
+                hdr[4] = (uint8_t)(total & 0xFF);
+                hdr[5] = (uint8_t)((total >> 8) & 0xFF);
+                hdr[6] = (uint8_t)((total >> 16) & 0xFF);
+                hdr[7] = (uint8_t)((total >> 24) & 0xFF);
+                uint64_t pts = stream.pack_cnt ? stream.pack[0].pts : 0;
+                hdr[8] = (uint8_t)(pts & 0xFF);
+                hdr[9] = (uint8_t)((pts >> 8) & 0xFF);
+                hdr[10] = (uint8_t)((pts >> 16) & 0xFF);
+                hdr[11] = (uint8_t)((pts >> 24) & 0xFF);
+
+                if (write_all(client_fd, hdr, WB_HDR_LEN) != 0 ||
+                    write_all(client_fd, frame, total) != 0) {
+                    fprintf(stderr, "  H265 TCP write fail\n");
+                    ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                    free(stream.pack);
+                    free(frame);
+                    break;
+                }
+                ss_mpi_venc_release_stream(VENC_CHN, &stream);
+                free(stream.pack);
+                free(frame);
+                continue;
+            }
+
+            /* ---------- RAW: comandos + frame bayer 48B header ---------- */
             fd_set rfds;
             struct timeval tv = {0, 10000};
             FD_ZERO(&rfds);
@@ -916,9 +1448,6 @@ int main(int argc, char *argv[])
                             if (cmd_len > 0) {
                                 cmd_buf[cmd_len] = '\0';
                                 process_command(cmd_buf);
-                                /* NOTE: no text response on the data socket.
-                                   Any bytes sent here would corrupt the binary
-                                   frame stream. Status is in the frame header. */
                                 cmd_len = 0;
                             }
                         } else if (cmd_len < (int)sizeof(cmd_buf) - 1) {
@@ -937,6 +1466,12 @@ int main(int argc, char *argv[])
             memset(&frame_info, 0, sizeof(frame_info));
             ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, timeout_ms);
             if (ret != TD_SUCCESS) {
+                /* Durante un switch_mode() el VI se destruye/reconstruye:
+                   los fallos son transitorios y NO deben cerrar el cliente. */
+                if (g_switching) {
+                    usleep(50000);
+                    continue;
+                }
                 consecutive_fail++;
                 fprintf(stderr, "  [DBG] get_chn_frame fail 0x%x (fail=%d)\n", ret, consecutive_fail);
                 fflush(stderr);
@@ -1011,18 +1546,536 @@ int main(int argc, char *argv[])
     }
 
     if (mem_mmaped) munmap(mem_map, mem_map_len);
-    close(mem_fd);
+    if (mem_fd >= 0) close(mem_fd);
+}
+
+/* AE manual vía ISP (modo H.265) */
+static void ae_apply_isp(void)
+{
+    ot_isp_exposure_attr attr;
+
+    if (ss_mpi_isp_get_exposure_attr(VI_PIPE_ID, &attr) != TD_SUCCESS) {
+        fprintf(stderr, "[ctrl] get_exposure_attr fail\n");
+        return;
+    }
+    if (g_manual_ae) {
+        attr.op_type = OT_OP_MODE_MANUAL;
+        attr.bypass = TD_FALSE;
+        attr.manual_attr.exp_time_op_type = OT_OP_MODE_MANUAL;
+        attr.manual_attr.exp_time = g_man_exp_us;
+        attr.manual_attr.a_gain_op_type = OT_OP_MODE_MANUAL;
+        attr.manual_attr.a_gain = g_man_again;
+        attr.manual_attr.d_gain_op_type = OT_OP_MODE_MANUAL;
+        attr.manual_attr.d_gain = g_man_dgain;
+        attr.manual_attr.ispd_gain_op_type = OT_OP_MODE_MANUAL;
+        attr.manual_attr.isp_d_gain = 1024;
+    } else {
+        attr.op_type = OT_OP_MODE_AUTO;
+        attr.bypass = TD_FALSE;
+    }
+    td_s32 r = ss_mpi_isp_set_exposure_attr(VI_PIPE_ID, &attr);
+    fprintf(stderr, "[ctrl] AE %s exp=%uus again=%u dgain=%u ret=0x%x\n",
+            g_manual_ae ? "MANUAL" : "AUTO", g_man_exp_us, g_man_again,
+            g_man_dgain, r);
+}
+
+/* --------------------------------------------------------------------
+ * Cambio de modo raw <-> h265 en runtime.  Tear-down del pipeline actual
+ * y rebuild en el otro modo.  El sensor y el MCLK NO se tocan.
+ * -------------------------------------------------------------------- */
+static int switch_mode(int new_mode)
+{
+    if (new_mode == g_mode) {
+        fprintf(stderr, "[ctrl] MODE ya es %s\n",
+                g_mode == MODE_H265 ? "H265" : "RAW");
+        return 0;
+    }
+
+    fprintf(stderr, "[ctrl] switch a modo %s...\n",
+            new_mode == MODE_H265 ? "H265" : "RAW");
+    fflush(stderr);
+
+    /* data_loop no debe contar fallos de get_chn_frame durante el
+       teardown/rebuild (cerraría el cliente del viewer). */
+    g_switching = 1;
+
+    if (g_mode == MODE_H265)
+        h265_teardown();
+    vi_teardown();
+
+    if (new_mode == MODE_H265) {
+        if (vi_setup_h265() != 0 ||
+            h265_sensor_setup() != 0 ||
+            h265_isp_setup() != 0 ||
+            h265_vpss_setup() != 0) {
+            fprintf(stderr, "[ctrl] switch a H265 FAIL — estado inconsistente\n");
+            g_switching = 0;
+            return -1;
+        }
+        if (h265_venc_setup() != 0) {
+            fprintf(stderr, "[ctrl] VENC FAIL en switch\n");
+            g_switching = 0;
+            return -1;
+        }
+        g_isp_thread_ok = 0;
+        if (pthread_create(&g_isp_thread, NULL, isp_thread_fn, NULL) != 0) {
+            fprintf(stderr, "FAIL pthread_create ISP\n");
+            g_switching = 0;
+            return -1;
+        }
+        g_isp_thread_ok = 1;
+        /* CCM del sensor (igual que en el init principal) */
+        {
+            ot_isp_color_matrix_attr ccm;
+            memset(&ccm, 0, sizeof(ccm));
+            if (ss_mpi_isp_get_ccm_attr(VI_PIPE_ID, &ccm) == TD_SUCCESS &&
+                ccm.auto_attr.ccm_tab_num >= 3) {
+                ccm.op_type = OT_OP_MODE_AUTO;
+                ccm.auto_attr.iso_act_en = TD_FALSE;
+                ccm.auto_attr.temp_act_en = TD_FALSE;
+                (void)ss_mpi_isp_set_ccm_attr(VI_PIPE_ID, &ccm);
+            }
+        }
+    } else {
+        if (vi_setup_raw() != 0) {
+            fprintf(stderr, "[ctrl] switch a RAW FAIL\n");
+            g_switching = 0;
+            return -1;
+        }
+    }
+    g_mode = new_mode;
+    g_switching = 0;
+    fprintf(stderr, "[ctrl] modo activo: %s\n",
+            g_mode == MODE_H265 ? "H265" : "RAW");
+    return 0;
+}
+
+/* --------------------------------------------------------------------
+ * Canal de control TCP (puerto CTRL_PORT).  Comandos de texto para ambos
+ * modos: MODE raw|h265, E/A/D/T (AE), X <reg>, R, ?.  Separado del socket
+ * de datos para no corromper el stream binario.
+ * -------------------------------------------------------------------- */
+static void ctrl_handle_client(int cfd)
+{
+    char buf[256];
+    size_t used = 0;
+
+    fprintf(stderr, "[ctrl] MODE raw|h265 | E <us> | A <again> | D <dgain> | "
+            "T auto | R status | X <reghex> | ? ayuda\n");
+    while (g_running) {
+        ssize_t n = read(cfd, buf + used, sizeof(buf) - 1 - used);
+        if (n <= 0) break;
+        used += (size_t)n;
+        char *p;
+        while (used > 0 && (p = memchr(buf, '\n', used)) != NULL) {
+            size_t len = (size_t)(p - buf);
+            if (len > 0 && buf[len - 1] == '\r') len--;
+            if (len > 0) {
+                buf[len] = 0;
+                char *line = buf;
+                if (g_mode == MODE_H265 &&
+                    (line[0] == 'E' || line[0] == 'A' || line[0] == 'D' ||
+                     line[0] == 'T')) {
+                    if (line[0] == 'E' && line[1] == ' ') {
+                        g_manual_ae = 1;
+                        g_man_exp_us = (td_u32)atoi(line + 2);
+                        if (g_man_exp_us < 100) g_man_exp_us = 100;
+                        if (g_man_exp_us > g_max_exp_us) g_man_exp_us = g_max_exp_us;
+                        ae_apply_isp();
+                    } else if (line[0] == 'A' && line[1] == ' ') {
+                        g_manual_ae = 1;
+                        g_man_again = (td_u32)atoi(line + 2);
+                        if (g_man_again < 1024) g_man_again = 1024;
+                        if (g_man_again > 32768) g_man_again = 32768;
+                        ae_apply_isp();
+                    } else if (line[0] == 'D' && line[1] == ' ') {
+                        g_manual_ae = 1;
+                        g_man_dgain = (td_u32)atoi(line + 2);
+                        if (g_man_dgain < 1024) g_man_dgain = 1024;
+                        if (g_man_dgain > 16384) g_man_dgain = 16384;
+                        ae_apply_isp();
+                    } else if (line[0] == 'T' && strncmp(line, "T auto", 6) == 0) {
+                        g_manual_ae = 0;
+                        ae_apply_isp();
+                    } else if (line[0] == 'T' && line[1] == ' ') {
+                        /* "T <us>": exposición manual en microsegundos */
+                        g_manual_ae = 1;
+                        g_man_exp_us = (td_u32)atoi(line + 2);
+                        if (g_man_exp_us < 100) g_man_exp_us = 100;
+                        if (g_man_exp_us > g_max_exp_us) g_man_exp_us = g_max_exp_us;
+                        ae_apply_isp();
+                    }
+                } else if (strncmp(line, "MODE ", 5) == 0) {
+                    int want = (!strncmp(line + 5, "h265", 4)) ? MODE_H265 : MODE_RAW;
+                    if (switch_mode(want) != 0)
+                        fprintf(stderr, "[ctrl] MODE switch falló\n");
+                } else if (line[0] == 'R') {
+                    if (g_mode == MODE_H265) {
+                        ot_isp_exp_info info;
+                        memset(&info, 0, sizeof(info));
+                        if (ss_mpi_isp_query_exposure_info(VI_PIPE_ID, &info) == TD_SUCCESS)
+                            fprintf(stderr, "[ctrl] H265 exp=%uus again=%u(%.2fx) "
+                                    "dgain=%u(%.2fx) fps=%u iso=%u\n",
+                                    info.exp_time, info.a_gain, info.a_gain / 1024.0,
+                                    info.d_gain, info.d_gain / 1024.0, info.fps, info.iso);
+                        else
+                            fprintf(stderr, "[ctrl] query_exposure_info fail\n");
+                    } else {
+                        fprintf(stderr, "[ctrl] RAW E=%u VMAX=%u A=%u D=%u TEMP=%.2fC\n",
+                                g_exposure_lines, g_vmax, g_again, g_dgain,
+                                (double)get_temp_cached() / 100.0);
+                    }
+                } else if (line[0] == 'X' && line[1] == ' ') {
+                    unsigned long r = strtoul(line + 2, NULL, 16);
+                    if (r <= 0xFFFF) {
+                        td_u8 b0 = i2c_read_reg((td_u16)r);
+                        td_u8 b1 = i2c_read_reg((td_u16)(r + 1));
+                        td_u8 b2 = i2c_read_reg((td_u16)(r + 2));
+                        fprintf(stderr, "[ctrl] reg 0x%04lX = %02X %02X %02X\n",
+                                r, b0, b1, b2);
+                    }
+                } else if (line[0] == '?') {
+                    fprintf(stderr, "[ctrl] MODE raw|h265 | E <us> | A <again> 22.10 | "
+                            "D <dgain> 22.10 | T auto | R status | X <reghex>\n");
+                } else {
+                    /* modo RAW: usar el mismo process_command del socket de datos */
+                    process_command(line);
+                }
+            }
+            used -= len + 1;
+            memmove(buf, p + 1, used);
+        }
+        if (used == sizeof(buf) - 1) used = 0;
+    }
+}
+
+static void *ctrl_thread_fn(void *arg)
+{
+    int port = *(int *)arg;
+    int sock = tcp_listen(port);
+
+    if (sock < 0) {
+        fprintf(stderr, "[ctrl] FAIL listen %d\n", port);
+        return NULL;
+    }
+    fprintf(stderr, "[ctrl] servidor control en puerto %d\n", port);
+    while (g_running) {
+        fd_set rfds;
+        struct timeval tv = { 1, 0 };
+        int r;
+        FD_ZERO(&rfds);
+        FD_SET(sock, &rfds);
+        r = select(sock + 1, &rfds, NULL, NULL, &tv);
+        if (r < 0 && errno == EINTR) continue;
+        if (r > 0) {
+            int cfd = accept(sock, NULL, NULL);
+            if (cfd >= 0) {
+                fprintf(stderr, "[ctrl] cliente conectado\n");
+                ctrl_handle_client(cfd);
+                close(cfd);
+                fprintf(stderr, "[ctrl] cliente desconectado\n");
+            }
+        }
+    }
+    close(sock);
+    return NULL;
+}
+
+int main(int argc, char *argv[])
+{
+    td_s32 ret;
+    int port = TCP_PORT;
+    ot_vb_pool pool = OT_VB_INVALID_POOL_ID;
+
+    int bench_seconds = 10;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--bench") == 0) g_bench = 1;
+        else if (strncmp(argv[i], "--bench=", 8) == 0) { g_bench = 1; bench_seconds = atoi(argv[i] + 8); }
+        else if (strcmp(argv[i], "--sweep") == 0) g_sweep = 1;
+        else if (strncmp(argv[i], "--incksel=", 10) == 0) g_incksel = (int)strtol(argv[i] + 10, NULL, 0);
+        else if (strncmp(argv[i], "--datarate=", 11) == 0) g_datarate = (int)strtol(argv[i] + 11, NULL, 0);
+        else if (strncmp(argv[i], "--vc=", 5) == 0) g_vc_num = (int)strtol(argv[i] + 5, NULL, 0);
+        else if (strncmp(argv[i], "--shrconv=", 10) == 0) g_shrconv = (int)strtol(argv[i] + 10, NULL, 0);
+        else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            g_mode = (strncmp(argv[i + 1], "h265", 4) == 0) ? MODE_H265 : MODE_RAW;
+            i++;
+        } else if (strncmp(argv[i], "--mode=", 7) == 0) {
+            g_mode = (strncmp(argv[i] + 7, "h265", 4) == 0) ? MODE_H265 : MODE_RAW;
+        } else if (strcmp(argv[i], "--ctrl-port") == 0 && i + 1 < argc) {
+            g_ctrl_port = atoi(argv[i + 1]);
+            i++;
+        } else if (strncmp(argv[i], "--ctrl-port=", 12) == 0) {
+            g_ctrl_port = atoi(argv[i] + 12);
+        } else if (strcmp(argv[i], "--bitrate") == 0 && i + 1 < argc) {
+            g_bitrate_kbps = atoi(argv[i + 1]);
+            i++;
+        } else if (strncmp(argv[i], "--bitrate=", 10) == 0) {
+            g_bitrate_kbps = atoi(argv[i] + 10);
+        }
+    }
+    if (argc > 1 && argv[1][0] != '-') port = atoi(argv[1]);
+    if (port <= 0) port = TCP_PORT;
+
+    /* sweep es un debug solo-RAW (usa el chn bayer): forzar modo RAW */
+    if (g_sweep) g_mode = MODE_RAW;
+
+    fprintf(stderr, "=== ASTRO Streamer (port %d, mode %s, ctrl %d) ===\n",
+            port, g_mode == MODE_H265 ? "H265" : "RAW", g_ctrl_port);
+
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
+    fprintf(stderr, "[0] MPI init...\n");
+    /* pre-clean parity waybeam: sys_exit() + vb_exit() ANTES de re-setear
+       el VB, y luego sys_init() DESPUÉS del vb_init (waybeam validated
+       con esta secuencia entrega imagen real; sin el pre-clean el VI
+       quedaba sin señal MIPI, frame blanco f0 0f ff tras reboot). */
+    ret = ot_mpi_sys_exit();
+    fprintf(stderr, "  sys_exit: 0x%x\n", ret);
+    usleep(50000);
+    ret = ot_mpi_vb_exit();
+    fprintf(stderr, "  vb_exit: 0x%x\n", ret);
+    usleep(50000);
+    ot_vb_cfg vb_cfg;
+    memset(&vb_cfg, 0, sizeof(vb_cfg));
+    /* Dos pools comunes: raw (bayer 12bpp, w*h*2 como waybeam) para VI,
+       yuv (YVU420) para VI-chn/VPSS/VENC en modo H.265.  Con el MMZ de
+       64MB caben. */
+    vb_cfg.max_pool_cnt = 2;
+    vb_cfg.common_pool[0].blk_size = (IMG_WIDTH * IMG_HEIGHT * 2) + 0x4000;
+    vb_cfg.common_pool[0].blk_cnt = 6;
+    vb_cfg.common_pool[0].remap_mode = OT_VB_REMAP_MODE_NONE;
+    strncpy(vb_cfg.common_pool[0].mmz_name, "anonymous", sizeof(vb_cfg.common_pool[0].mmz_name) - 1);
+    vb_cfg.common_pool[1].blk_size = (IMG_WIDTH * IMG_HEIGHT * 3 / 2) + 0x4000;
+    vb_cfg.common_pool[1].blk_cnt = 4;
+    vb_cfg.common_pool[1].remap_mode = OT_VB_REMAP_MODE_NONE;
+    strncpy(vb_cfg.common_pool[1].mmz_name, "anonymous", sizeof(vb_cfg.common_pool[1].mmz_name) - 1);
+    ret = ot_mpi_vb_set_cfg(&vb_cfg);
+    fprintf(stderr, "  set_cfg: 0x%x\n", ret);
+    ret = ot_mpi_vb_init();
+    fprintf(stderr, "  init: 0x%x\n", ret);
+    ret = ot_mpi_sys_init();
+    fprintf(stderr, "  sys_init: 0x%x\n", ret);
+
+    fprintf(stderr, "[3] VB pool...\n");
+    /* Use the common pool created by vb_init for the VI module (no user pool). */
+    ot_vb_common_pools_id pools_id;
+    memset(&pools_id, 0, sizeof(pools_id));
+    ret = ot_mpi_vb_get_common_pool_id(&pools_id);
+    fprintf(stderr, "  get_common_pool_id: 0x%x cnt=%u id[0]=%u\n",
+            ret, pools_id.pool_cnt,
+            pools_id.pool_cnt > 0 ? pools_id.pool[0] : (ot_vb_pool)-1);
+    if (pools_id.pool_cnt == 0) {
+        ot_vb_pool_cfg pool_cfg;
+        memset(&pool_cfg, 0, sizeof(pool_cfg));
+        pool_cfg.blk_size = RAW12_BUF_SIZE;
+        pool_cfg.blk_cnt = 6;
+        pool_cfg.remap_mode = OT_VB_REMAP_MODE_NONE;
+        strncpy(pool_cfg.mmz_name, "anonymous", sizeof(pool_cfg.mmz_name) - 1);
+        pool = ot_mpi_vb_create_pool(&pool_cfg);
+        if (pool == OT_VB_INVALID_POOL_ID) { fprintf(stderr, "  create_pool FAILED\n"); goto cleanup; }
+        fprintf(stderr, "  create_pool=%u\n", pool);
+    }
+    ret = ot_mpi_vb_init_mod_common_pool(OT_VB_UID_VI);
+    fprintf(stderr, "  init_mod_common_pool(VI): 0x%x\n", ret);
+    ret = ot_mpi_vb_init_mod_common_pool(OT_VB_UID_VPSS);
+    fprintf(stderr, "  init_mod_common_pool(VPSS): 0x%x\n", ret);
+    ret = ot_mpi_vb_init_mod_common_pool(OT_VB_UID_VENC);
+    fprintf(stderr, "  init_mod_common_pool(VENC): 0x%x\n", ret);
+
+    /* [4] NO se llama ss_mpi_sys_set_vi_vpss_mode (parity waybeam offline:
+       el branch offline solo hace sys_init(); el modo VI-offline ya es el
+       atributo estático del MPP).  Llamarlo aquí dejaba el VI sin señal
+       MIPI -> frame blanco. */
+
+    fprintf(stderr, "[5] MCLK + sensor + MIPI RX...\n");
+    enable_mclk_and_reset_sensor();
+
+    fprintf(stderr, "[6] VI pipeline (%s)...\n",
+            g_mode == MODE_H265 ? "H265" : "RAW");
+    if (g_mode == MODE_H265) {
+        /* orden parity waybeam: MIPI -> VI -> I2C/lib -> ISP -> VPSS -> VENC */
+        if (vi_setup_h265() != 0) {
+            fprintf(stderr, "  H265 pipeline FAIL (vi)\n");
+            goto cleanup;
+        }
+        /* I2C al sensor (parity waybeam: se abre DESPUÉS del VI setup). */
+        g_i2c_fd = open("/dev/i2c-0", O_RDWR);
+        if (g_i2c_fd >= 0) {
+            ret = ioctl(g_i2c_fd, OT_I2C_SLAVE_FORCE, (I2C_DEV_ADDR >> 1));
+            if (ret < 0) { fprintf(stderr, "  I2C fail\n"); close(g_i2c_fd); g_i2c_fd = -1; }
+            else {
+                unsigned char rid_reg[2] = {0x30, 0xDC};
+                unsigned char rid_val = 0;
+                write(g_i2c_fd, rid_reg, 2);
+                read(g_i2c_fd, &rid_val, 1);
+                fprintf(stderr, "  Chip ID=0x%02X\n", rid_val);
+            }
+        }
+        if (h265_sensor_setup() != 0 ||
+            h265_isp_setup() != 0 ||
+            h265_vpss_setup() != 0 ||
+            h265_venc_setup() != 0) {
+            fprintf(stderr, "  H265 pipeline FAIL\n");
+            goto cleanup;
+        }
+        if (pthread_create(&g_isp_thread, NULL, isp_thread_fn, NULL) != 0) {
+            fprintf(stderr, "  FAIL pthread_create ISP\n");
+            goto cleanup;
+        }
+        g_isp_thread_ok = 1;
+        /* CCM del sensor (igual que waybeam) */
+        {
+            ot_isp_color_matrix_attr ccm;
+            memset(&ccm, 0, sizeof(ccm));
+            if (ss_mpi_isp_get_ccm_attr(VI_PIPE_ID, &ccm) == TD_SUCCESS &&
+                ccm.auto_attr.ccm_tab_num >= 3) {
+                ccm.op_type = OT_OP_MODE_AUTO;
+                ccm.auto_attr.iso_act_en = TD_FALSE;
+                ccm.auto_attr.temp_act_en = TD_FALSE;
+                (void)ss_mpi_isp_set_ccm_attr(VI_PIPE_ID, &ccm);
+            }
+        }
+        g_max_exp_us = 33333;
+        fprintf(stderr, "  H265 pipeline OK\n");
+    } else {
+        if (vi_setup_raw() != 0) {
+            fprintf(stderr, "  RAW pipeline FAIL\n");
+            goto cleanup;
+        }
+        g_i2c_fd = open("/dev/i2c-0", O_RDWR);
+        if (g_i2c_fd >= 0) {
+            ret = ioctl(g_i2c_fd, OT_I2C_SLAVE_FORCE, (I2C_DEV_ADDR >> 1));
+            if (ret < 0) { fprintf(stderr, "  I2C fail\n"); close(g_i2c_fd); g_i2c_fd = -1; }
+            else {
+                unsigned char rid_reg[2] = {0x30, 0xDC};
+                unsigned char rid_val = 0;
+                write(g_i2c_fd, rid_reg, 2);
+                read(g_i2c_fd, &rid_val, 1);
+                fprintf(stderr, "  Chip ID=0x%02X\n", rid_val);
+            }
+        }
+        if (init_sensor_full() == 0) fprintf(stderr, "  Sensor OK\n");
+        g_max_exp_us = 33333;
+    }
+    usleep(200000);
+
+    if (g_bench) {
+        fprintf(stderr, "[10] BENCH mode (%s): measuring for %ds...\n",
+                g_mode == MODE_H265 ? "H265" : "RAW", bench_seconds);
+        fflush(stderr);
+
+        if (g_mode == MODE_H265) {
+            h265_run_loop(-1, bench_seconds);
+            fprintf(stderr, "BENCH done: frames=%llu bytes=%llu idr=%llu\n",
+                    (unsigned long long)g_h265_frames,
+                    (unsigned long long)g_h265_bytes,
+                    (unsigned long long)g_h265_idr);
+        } else {
+            struct timeval t_start, t_now;
+            gettimeofday(&t_start, NULL);
+            int frames = 0, errors = 0;
+
+            while (g_running) {
+                ot_video_frame_info frame_info;
+                memset(&frame_info, 0, sizeof(frame_info));
+                ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 3000);
+                if (ret != TD_SUCCESS) { errors++; if (errors > 30) break; continue; }
+                ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
+                frames++;
+
+                gettimeofday(&t_now, NULL);
+                double elapsed = (t_now.tv_sec - t_start.tv_sec) +
+                                 (t_now.tv_usec - t_start.tv_usec) / 1e6;
+                if (elapsed >= bench_seconds) break;
+                if (elapsed >= 2.0) {
+                    fprintf(stderr, "  frames=%d in %.1fs = %.2f fps (err=%d)\n",
+                            frames, elapsed, frames / elapsed, errors);
+                    fflush(stderr);
+                    frames = 0; errors = 0;
+                    gettimeofday(&t_start, NULL);
+                }
+            }
+            fprintf(stderr, "BENCH done.\n");
+        }
+        goto cleanup;
+    }
+
+    if (g_sweep) {
+        fprintf(stderr, "[10] SWEEP mode: relocking PLL for each INCK_SEL...\n");
+        fflush(stderr);
+
+        static const struct { int inc; int dr; } sweep_table[] = {
+            {0x01, 0x02}, {0x01, 0x05}, {0x02, 0x05}, {0x03, 0x05},
+            {0x04, 0x05}, {0x00, 0x05}, {0x05, 0x05}, {0x06, 0x05},
+            {0x07, 0x05}, {0x00, 0x02}, {0x02, 0x02}, {0x03, 0x02},
+            {0x04, 0x02}, {0x05, 0x02},
+        };
+
+        for (unsigned s = 0; s < sizeof(sweep_table)/sizeof(sweep_table[0]) && g_running; s++) {
+            int inc = sweep_table[s].inc;
+            int dr = sweep_table[s].dr;
+
+            i2c_write_reg(0x3000, 0x01);
+            usleep(50000);
+            i2c_write_reg(0x3014, (td_u8)inc);
+            i2c_write_reg(0x3015, (td_u8)dr);
+            i2c_write_reg(0x3000, 0x00);
+            usleep(200000);
+
+            struct timeval t_start, t_now;
+            gettimeofday(&t_start, NULL);
+            int frames = 0, errors = 0;
+            while (g_running) {
+                ot_video_frame_info frame_info;
+                memset(&frame_info, 0, sizeof(frame_info));
+                ret = ot_mpi_vi_get_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info, 2000);
+                if (ret != TD_SUCCESS) { errors++; continue; }
+                ot_mpi_vi_release_chn_frame(VI_PIPE_ID, VI_CHN_ID, &frame_info);
+                frames++;
+                gettimeofday(&t_now, NULL);
+                double elapsed = (t_now.tv_sec - t_start.tv_sec) +
+                                 (t_now.tv_usec - t_start.tv_usec) / 1e6;
+                if (elapsed >= 3.0) break;
+            }
+            fprintf(stderr, "SWEEP INCK=0x%02X DR=0x%02X: %d frames in ~3s = %.2f fps (err=%d)\n",
+                    inc, dr, frames, frames / 3.0, errors);
+            fflush(stderr);
+        }
+        fprintf(stderr, "SWEEP done.\n");
+        goto cleanup;
+    }
+
+    fprintf(stderr, "[10] TCP server on port %d...\n", port);
+    fflush(stderr);
+
+    /* Arranca el canal de control (MODE raw|h265 + AE) en puerto separado */
+    if (g_ctrl_port > 0 && !g_bench && !g_sweep) {
+        g_ctrl_thread_arg = g_ctrl_port;
+        if (pthread_create(&g_ctrl_thread, NULL, ctrl_thread_fn,
+                           &g_ctrl_thread_arg) != 0)
+            fprintf(stderr, "  FAIL pthread_create CTRL\n");
+    }
+
+    int server_fd = tcp_listen(port);
+    if (server_fd < 0) goto cleanup;
+    fprintf(stderr, "  Waiting for client on port %d...\n", port);
+    fflush(stderr);
+
+    data_loop(server_fd);
     close(server_fd);
+
+    if (g_ctrl_port > 0 && !g_bench && !g_sweep)
+        pthread_join(g_ctrl_thread, NULL);
 
 cleanup:
     fprintf(stderr, "Cleanup...\n");
     fflush(stderr);
     if (g_i2c_fd >= 0) close(g_i2c_fd);
-    ot_mpi_vi_disable_chn(VI_PIPE_ID, VI_CHN_ID);
-    ot_mpi_vi_stop_pipe(VI_PIPE_ID);
-    ot_mpi_vi_destroy_pipe(VI_PIPE_ID);
-    ot_mpi_vi_unbind(VI_DEV_ID, VI_PIPE_ID);
-    ot_mpi_vi_disable_dev(VI_DEV_ID);
+    if (g_mode == MODE_H265)
+        h265_teardown();
+    vi_teardown();
     usleep(200000);
     fprintf(stderr, "Done.\n");
     fflush(stderr);
