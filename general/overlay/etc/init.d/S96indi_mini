@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# S96indi_mini — mini servidor INDI IMX662 (utils/indi_mini.c).
+# Arranca /usr/app/indi_mini al boot, DESPUÉS de S70vendor (módulos MPP).
+# El binario vive en /usr/app (appfs persistente), el log en /tmp (tmpfs).
+#
+# - modprobe open_adc: NTC del módulo para CCD_TEMPERATURE (opcional;
+#   si falla, indi_mini arranca igual sin temperatura).
+# - majestic (S95) compite por el pipeline VI y está descartado en este
+#   SoC (VI-online NOT_PERM) -> se detiene antes de arrancar indi_mini.
+# - Parada con SIGTERM (limpia); NUNCA kill -9 (corrompe el estado VB).
+
+DAEMON="indi_mini"
+DAEMON_PATH="/usr/app/indi_mini"
+PIDFILE="/var/run/$DAEMON.pid"
+LOGFILE="/tmp/indi_mini.log"
+DAEMON_ARGS="--preset validated --port 7624 --logfile /tmp/indi_mini.log"
+
+start() {
+	echo -n "Starting $DAEMON: "
+	[ -x "$DAEMON_PATH" ] || { echo "NOT FOUND"; return 0; }
+	if pidof majestic >/dev/null 2>&1; then
+		/etc/init.d/S95majestic stop >/dev/null 2>&1
+		sleep 1
+		killall -q majestic 2>/dev/null
+		sleep 1
+	fi
+	modprobe open_adc >/dev/null 2>&1
+	start-stop-daemon -b -m -S -q -p "$PIDFILE" -x "$DAEMON_PATH" -- $DAEMON_ARGS >>"$LOGFILE" 2>&1
+	if [ $? -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+}
+
+stop() {
+	echo -n "Stopping $DAEMON: "
+	start-stop-daemon -K -q -p "$PIDFILE"
+	if [ $? -eq 0 ]; then
+		rm -f "$PIDFILE"
+		echo "OK"
+	else
+		echo "FAIL"
+	fi
+}
+
+case "$1" in
+	start|stop)
+		$1
+		;;
+
+	restart)
+		stop
+		sleep 3
+		start
+		;;
+
+	reload)
+		killall -1 "$DAEMON"
+		;;
+
+	*)
+		echo "Usage: $0 {start|stop|restart|reload}"
+		exit 1
+		;;
+esac

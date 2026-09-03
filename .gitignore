@@ -25,3 +25,7 @@ golden_sets/
 AGENTS.md
 opencode.json
 CONTEXT.md
+.vscode/
+utils/indi_mini
+utils/i2c_peek
+utils/adc_read

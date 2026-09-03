@@ -6,6 +6,302 @@
 
 ---
 
+## 2026-09-03 (noche) — 4 mejoras a indi_mini (3 verificadas en vivo, pool pendiente de reboot)
+
+**Cambió** (`utils/indi_mini.c`, binario `ade0eb16…` en `/usr/app/indi_mini`):
+1. **FITS más completo:** tarjetas `XPIXSZ/YPIXSZ` (=2.9µm × bin, para
+   plate-solving), `XBAYROFF/YBAYROFF=0` (offsets pares preservan fase RGGB),
+   `XBINNING/YBINNING` reales. Selftest extendido. Verificado: download trae
+   las tarjetas.
+2. **Switch estándar `UPLOAD_MODE`** (Client/Local/Both, def + handler): Ekos
+   ya no avisa "No UPLOAD_MODE... update driver". Verificado: set a Both y
+   de vuelta a Client con echo correcto (quedó en Client).
+3. **Binning 2x2 por soft** (promedio, helper `pix8` con selftest): def
+   `CCD_BINNING` max 1→2, handler cuadrado 1/2, loop emite 960×540,
+   `blob_sz` y header consistentes. Verificado: expo 0.05s en bin2 →
+   FITS 1039680 B exactos (2880+960·540·2), NAXIS 960×540, XBINNING=2,
+   XPIXSZ=5.80. Nota: el promediado mezcla el Bayer (para fotometría usar 1x1).
+4. **Pool VB 4→8 bloques** (33MB, cabe en MMZ 64MB): **aplicado tras reboot**
+   (ver abajo).
+
+**Hallazgo (pool): `vb_exit` falla con `NOT_PERM` en restart.**
+Decodificado con `ot_errno.h` del SDK: `0xa001800d` → mod VB, err `0x0d` =
+`OT_ERR_NOT_PERM`. El `set_cfg` posterior retorna éxito pero es **no-op**
+(igual que documenta AGENTS.md): el pool que vale es el del **primer run tras
+el boot** (quedó en 4). Para que entre el 8 hace falta reboot. fix menor
+incluido: pre-clean/teardown ahora loguean a stderr
+(antes a stdout=/dev/null bajo daemon) + SIGTERM aborta worker en curso y
+espera hasta 5s a que libere su frame antes del teardown.
+
+**Resuelto con el reboot del usuario (2026-09-03 noche): pool=8 APLICADO**
+(`blk_cnt 8, free 5, min_free 3`), `vb_fail_cnt=0` (antes 1/3 descartados),
+`send≈int` (372/372). Nota: `frame_rate=1` post-boot NO es bug — Ekos hizo
+una expo de 1s (`VMAX=0x9284=37508` por readback) y el VMAX queda donde lo
+dejó la última exposición (diseño, sin restore); el sensor sigue el timing
+pedido (1fps@37508, 20fps@1883, 30fps@1250). `i2c_peek` ahora en `/usr/app`
+(persistente; `/tmp` se borra con reboot).
+
+**Lección:** en este MPP, `vb_exit` tras `sys_exit` = NOT_PERM siempre; el
+resize de pools VB solo entra con reboot. No reiniciar pools "porque sí":
+para stills de Ekos el pool de 4 no molesta (20fps efectivos solo importan
+para video).
+
+## 2026-09-03 (sigue) — ROOT CAUSE downloading: `defBLOBVector perm="wo"` impedía que Ekos cree su BlobManager
+
+**Síntoma:** Ekos siempre manda `enableBLOB Never`, el diálogo "would you like
+to enable it?" + Yes no tiene ningún efecto en el wire, y el Preview queda en
+"downloading" eterno. El `--blob-force` tampoco lo movió (Ekos descarta BLOBs
+no pedidos en modo Never).
+
+**Root cause (código fuente de Ekos, clonado y leído):**
+- `ClientManager::newDevice` manda `B_NEVER` al conectar (por eso el Never).
+- Los BLOBs los maneja una conexión SEPARADA `BlobManager` por propiedad BLOB,
+  creada en `processNewProperty` SOLO si
+  `prop.getType() == INDI_BLOB && prop.getPermission() != IP_WO`.
+- Nuestro `defBLOBVector` anunciaba **`perm="wo"`** (¡write-only para IMÁGENES!)
+  → Ekos **jamás crea el BlobManager** → `isBLOBEnabled()` siempre false →
+  el Yes del diálogo llama a `setBLOBEnabled(true)` que no encuentra ningún
+  manager y **no hace nada** → jamás llega `Also`/`Only` → downloading eterno.
+- `setBLOBEnabled(true)` manda `B_ONLY` para (device, CCD1) — ya soportado
+  (`blob_mode=2`, se envía igual que Also).
+
+**Resuelto:** `perm="wo"` → `perm="ro"` (+ `state Ok`→`Idle` en el def, más
+correcto). Binario `67d5c718…` desplegado (sin `--blob-force` en S96, ya
+innecesario; el flag queda en el binario). Verificado: `perm="ro"` visible en
+defs; flujo dos-conexiones (main Never + Only para CCD1) parsea `blob_mode=2`.
+
+**CONFIRMADO por el usuario (2026-09-03 noche): el Preview de Ekos muestra la
+imagen.** En el log se ve el BlobManager de Ekos (fd=12, `Only`, `blob_mode=2`)
+y exposiciones completándose. Fin del ciclo connect→capture→download.
+
+**Lección:** ante un cliente que "no pide", verificar qué espera el cliente
+para pedir (perm del def), no solo el request. El `perm` mal puesto volvió
+inútil todo lo demás (incluido el workaround force).
+
+## 2026-09-03 (sigue) — Workaround `--blob-force`: Ekos 3.8.0 no manda Also aunque se le diga Yes
+
+**Síntoma:** Ekos pregunta "image transfer is disabled, would you like to enable
+it?", el usuario siempre dice Yes, pero en el wire **sigue mandando
+`<enableBLOB>Never</enableBLOB>` en cada conexión** (verificado 4 conexiones
+seguidas, `blob_mode=0` siempre). Sin BLOB, Ekos queda en "downloading" eterno
+aunque la exposición complete Ok.
+
+**Workaround en `utils/indi_mini.c`:** flag `--blob-force` (default OFF; activado
+en `S96indi_mini`): el FITS se envía a todo cliente activo aunque haya pedido
+Never. Si el cliente lo descarta, queda como antes (sin regresión); si lo
+acepta, la imagen llega sin depender del ajuste de Ekos. Verificado por socket:
+`Never` + force → BLOB 5.5MB + Ok en 0.7s. Binario `8bb02ba6…`, servicio con
+`--blob-force`, device en `Idle`.
+
+**Pendiente de confirmar:** si Ekos 3.8.0 MUESTRA el BLOB no solicitado o lo
+descarta (entonces seguiría en "downloading" y habría que encontrar dónde Ekos
+persiste el upload mode — jobs .esq, profile, o config file).
+
+## 2026-09-03 (sigue) — "Stuck en capturing": sensor con vsync congelado, se recuperó con restart (causa raíz NO confirmada)
+
+**Síntoma:** tras varios intentos de Ekos (exposiciones 1s + ABORTs), el worker
+de exposición dejó de completarse: `exposición 1.000s` en log sin completion,
+Ekos "capturing" eterno (en realidad loop fail→retry de ~15s por grab-timeouts).
+
+**Evidencia (confusa):**
+- `vsync_cnt` congelado (13→13 en 2s y 3s) con VMAX=37508 (período 1s) →
+  parecía sensor detenido. PERO `freq_measure=896MHz`, `lane0_data=0xed`,
+  `mipi_ph_d0=0x2c` (RAW12!), `vc0=1920x1080`, sin errores PHY → **el MIPI
+  emite**. Contradictorio; el contador vsync quizá no refleja lo que creemos.
+- VI pipe/chn `enable=Y`, `send_cnt=679`, `frame_rate=20`, pero
+  `vb_fail_cnt=339` (1/3 de interrupciones descartadas: 1019 ints vs 679 sends).
+- I2C OK durante el atasco (`i2c_peek`: 14/14 regs leídos, standby off,
+  streaming on). El atasco murió con el restart: run nuevo entrega 0.05s y
+  1s OK + BLOB 5.5MB.
+- Tras el restart, exposición 1s tarda 2.5s reales → **el VMAX SÍ aplica**
+  (los "0.5s" medidos antes fueron con VMAX ya aplicado y sin flush).
+
+**Verificado en register map (`imx662_docs/`, SRM + Excel):**
+- `0x3001` = REGHOLD (hold V-registers), `0x3002` = XMSTA (0=start/1=stop).
+  El código tenía `#define REG_XMSTA 0x3001` (MAL rotulado; escribía REGHOLD=0,
+  inocuo). Corregido a `0x3002` (la tabla init ya ponía `0x3002=0x00`, por eso
+  siempre anduvo). VMAX/SHR/GAIN son reflexión "V" (sin standby, OK).
+- Nueva tool `utils/i2c_peek.c` (solo lectura, I2C_RDWR) para diagnóstico en
+  vivo sin tocar el pipeline. Binario en `/tmp` del device.
+- Hardening: exposición solapada ahora re-envía `Busy` (antes solo mensaje →
+  el cliente que reintentaba quedaba esperando a ciegas).
+
+**Binario `f2269062…` desplegado, verificado** (0.05s/1s/2s + solapada → Ok,
+device en `Idle`). Causa del wedge original: **no determinada** (candidatos:
+stall I2C transitorio bajo martilleo exposición+ABORT, o estado VI/MIPI que
+el restart limpió). Si recurre: `i2c_peek` + `vsync_cnt` + threads/wchan
+antes de reiniciar.
+
+**Lección:** `vsync_cnt` congelado NO implica sensor muerto si el PHY ve
+clock+dato (mirar `freq_measure`/`lane0_data`/`mipi_ph_d0` primero).
+
+## 2026-09-03 (sigue) — FIX: captura fallaba con Ekos en modo BLOB Never (Alert espurio)
+
+**Síntoma:** Conectado OK, pero "Capture failed" 1-2s después de pedir 1s de
+exposición, con reintentos y ABORTs encadenados.
+
+**Root cause:** Ekos manda `<enableBLOB ...>Never</enableBLOB>` por defecto →
+`blob_mode=0` → `stream_fits_blob` no tenía a quién enviarle el FITS
+(`sent_ok=0`) → `return sent_ok ? 0 : -1` → **-1 aunque la captura había
+salido bien** → worker responde `state="Alert"` + "frame capture failed".
+Verificado por socket: con `Also` la misma exposición daba `Ok` + BLOB FITS
+de 5.5MB en 0.5s (pipeline sano); el fallo era solo el modo Never.
+
+**Resuelto:** `stream_fits_blob` devuelve 0 si la captura (grab+mmap) salió
+bien, haya o no receptores BLOB; -1/-2 solo ante fallo real de captura o
+abort. Binario `34a6a332…` desplegado, verificado: `Also` → Ok+5.5MB,
+`Never` → Ok sin BLOB (344 B). Device en `Idle`.
+
+**Lección:** según el estándar INDI, con BLOB Never el driver igual debe
+completar la exposición con Ok y simplemente omitir el envío. No mezclar
+"nadie pidió el blob" con "la captura falló".
+
+## 2026-09-03 (sigue) — FIX: Ekos manda comillas simples → CONNECT ignorado (root cause del "Failed to connect")
+
+**Síntoma:** Ekos conectaba al servidor (7624 OK, "Remote devices established")
+pero "Failed to connect to IMX662 CCD" a los 10s. Por socket manual el CONNECT
+respondía `Ok` en <1s → el protocolo parecía sano.
+
+**Root cause (capturado en `/tmp/indi_mini.log` con el nuevo `--logfile`):**
+Ekos manda XML con **comillas simples** y espacios de relleno:
+`<newSwitchVector device='IMX662 CCD' name='CONNECTION'>  <oneSwitch
+name='CONNECT'>      On  </oneSwitch></newSwitchVector>`. `xml_get_attr`
+buscaba `device="` (dobles) → fallaba → el handler de CONNECTION hacía
+`return` silencioso **sin responder** → Ekos agotaba su timeout de 10s.
+(Doble bug: además el valor venía con espacios `"      On  "` y el
+`strcmp(val,"On")` tampoco hubiera matcheado.)
+
+**Resuelto en `utils/indi_mini.c`:** `xml_get_attr` acepta `'` o `"` como
+delimitador; `xml_get_elem` recorta whitespace del valor. Selftest extendido
+con el caso Ekos literal → `SELFTEST OK`. Binario `e2dc85f9…` desplegado en
+`/usr/app/indi_mini`, servicio reiniciado, **verificado con los bytes exactos
+de Ekos → responde `state="Ok"`**. Device dejado en `Idle` para la prueba.
+
+**Nota:** Ekos además manda `<enableBLOB ...>Never</enableBLOB>` por defecto:
+tras conectar hay que poner **Upload=Client/Both** en Ekos o no llegan BLOBs
+(pendiente ya anotado). `S96indi_mini` ahora pasa `--logfile /tmp/indi_mini.log`.
+
+**Lección:** el estándar INDI permite ambas comillas; un parser que solo acepta
+dobles falla silenciosamente solo con ciertos clientes (probe Python OK, Ekos
+roto). Ante "timeout del cliente", capturar los bytes reales antes de teorizar.
+
+## 2026-09-03 (sigue) — Servicio S96indi_mini: `indi_mini` arranca solo al boot (VERIFICADO con reboot)
+
+**Cambió:** Nuevo init script `general/overlay/etc/init.d/S96indi_mini`
+(en el repo, para que sobreviva rebuilds) + instalado en vivo en el device
+(`/etc/init.d/S96indi_mini`, overlay, 1517 B). Arranca
+`/usr/app/indi_mini --preset validated --port 7624` con `start-stop-daemon`
+(pidfile `/var/run/indi_mini.pid`, log `/tmp/indi_mini.log`). Orden S96:
+corre después de S70vendor (módulos MPP ya cargados). El script hace
+`modprobe open_adc` (NTC para CCD_TEMPERATURE; si falla arranca igual sin
+temp — `open_adc.ko` ya vive en `/lib/modules`, no hay que copiarlo) y
+detiene a majestic si estuviera corriendo (compite por el VI). Parada con
+SIGTERM (limpia, nunca kill -9). Además se deshabilitó el autostart de
+majestic (`chmod -x /etc/init.d/S95majestic`, persistente en overlay):
+está descartado en este SoC (VI-online NOT_PERM) y corría antes (S95<S96),
+riesgo de robarle el pipeline VI al arrancar.
+
+**Verificado:** `start` → proceso + `LISTEN 7624` + handshake INDI
+(`IMX662 CCD` responde `defTextVector`); ciclo `stop`/`start` OK (re-bindea
+7624 sin estado VB corrupto); **reboot → a los ~45s el puerto 7624 ya
+responde INDI** (uptime 0 min, pid 1088 = pidfile, majestic ausente).
+Binario en `/usr/app/indi_mini` (md5 `58571d5b…`, 55K).
+
+**Lección:** En este firmware el autostart no es crontab sino SysV
+(`/etc/init.d/Sxx`, orden alfabético = orden de arranque). Para que un
+servicio sobreviva tanto a reboots como a rebuilds hay que ponerlo en DOS
+lados: `general/overlay/etc/init.d/` (repo) + `/etc/init.d/` en vivo
+(overlay JFFS2, 300KB libres al momento).
+
+## 2026-09-03 — NUEVO: utils/indi_mini.c (mini servidor INDI, puerto 7624)
+
+**Cambió:** Servidor INDI mínimo en C puro, sin libindi (no cabe en flash/RAM).
+Reutiliza el path RAW verificado de `astro_streamer.c` (VI ISP-bypass + init
+manual + VMAX extendido para larga exposición). Expone device `IMX662 CCD` con
+DRIVER_INFO, CONNECTION, CCD_INFO, CCD_EXPOSURE (0.001–25s, VMAX real en
+sensor), CCD_ABORT_EXPOSURE, CCD_FRAME_TYPE, CCD_FRAME (crop por soft),
+CCD_BINNING (solo 1x1), CCD_GAIN (dB 0–54 → again/dgain), CCD_TEMPERATURE y
+CCD1 (BLOB FITS base64 en streaming, sin buffer de 5.5MB en RAM). Link mínimo
+(ss_mpi/sysmem/sysbind/ot_osal/securec, sin ISP/VENC/VPSS). Binario ARM 51KB.
+
+**Verificado:** cross-compila limpio (`build_indi_mini.sh`) + selftest de host
+(`gcc -DINDI_SELFTEST`: base64, gain map, header FITS sin NULs, parser XML →
+SELFTEST OK). **NO probado en device** (192.168.1.16 inalcanzable desde este
+entorno): falta deploy + `indi_getprop`/Ekos contra 7624 + comparar FITS vs
+golden_sets. Encontrado y corregido en el camino: `fits_card` dejaba NULs en el
+bloque de 2880 (el mismo patrón sigue en `astro_streamer.c:write_fits` —
+pendiente unificar).
+
+**Lección:** El protocolo INDI es XML suficientemente simple como para hablarlo
+a mano; la librería solo aporta drivers genéricos que acá no sirven (el sensor
+necesita el pipeline propio).
+
+## 2026-09-03 (sigue) — Temperatura del módulo: NTC en LSADC CH1 (TSENSOR descartado)
+
+**Investigación (a pedido: "usar algún sensor del módulo como referencia"):**
+1. **TSENSOR del SoC: DESCARTADO.** `pm.o` (open_pm) tiene `g_Tsensor_addr` y
+   fórmula (`T=((165*raw-19305)/2*0xA4402911)>>32>>8-40`, raw10 en base+8),
+   pero es para OTROS chips: `temp_ctrl_init` solo acepta IDs
+   0x3516E200/0x3516E300/0x3518E200/0x3516D200 y mapea 0x1202xxxx. En CV610
+   (SYS_CTRL en 0x11020000) leer 0x120200EE0 da **external abort (SIGBUS)**.
+   Sin TRM del CV610 ni nodo thermal en el DTS → pozo sin fondo.
+2. **Barrido SYS_CTRL+MISC bajo carga** (100% CPU 2.5 min): cero cambios →
+   sin registro térmico visible ahí.
+3. **LSADC (0x11100000): HALLAZGO.** `open_adc.ko` existe en el tree pero no se
+   carga. Cargado a mano (`insmod /tmp/adc.ko` → `/dev/ot_lsadc`) + tool
+   `utils/adc_read.c`: **CH1=841 estable** (10-bit), CH0=1023 (VREF),
+   CH2/CH3=0 (GND). Bajo carga CH1 841→842 (reversible): **NTC térmico real**.
+   I2C scan confirma que no hay otro chip de temp en el módulo.
+
+**Implementado en `indi_mini` (binario `ecb8bd19`, corriendo):** lectura del NTC
+por ioctl LSADC + Steinhart-Hart (`R=Rs*f/(1-f)`, defaults NTC 100k β=3950 +
+serie 22k → 841 LSB ≈ 24.8°C, ajustables por `--temp-r-series/--temp-r25/--temp-beta`).
+`CCD_TEMPERATURE` se anuncia SOLO si `/dev/ot_lsadc` abre bien (si no, como
+antes: sin propiedad). Refresh post-exposición + tarjeta FITS CCD-TEMP.
+**Verificado:** defs traen 24.80°C plausibles.
+
+**Caveats:** el driver LSADC es open-exclusivo (segundo open da EPERM — por eso
+`indi_mini` lo mantiene abierto); `open_adc.ko` vive en /tmp → **re-insmod en
+cada reboot** antes de arrancar `indi_mini` (si no, arranca sin temperatura).
+La calibración absoluta depende del divisor real: contrastar con termómetro
+ambiente y ajustar `--temp-r-series` si difiere. Es temp de placa (cerca del
+SoC), no del die del sensor: referencia relativa, no absoluta del pixel.
+
+**Verificado en device (2026-09-03, segunda parte) — 4 bugs encontrados:**
+1. Solo el 1er mensaje por conexión funcionaba: `xml_split_msg` incluye el `\n`
+   previo en `ml` y el dispatch esperaba `msg[0]=='<'` → mismatch silencioso.
+   Fix: strip de whitespace al extraer.
+2. `setSwitchVector` de CONNECTION con `state`/`timestamp` trocados.
+3. FITS en little-endian (el estándar exige big-endian) → Ekos/ds9 verían
+   0xFF00 en vez de 0x00FF.
+4. **Segfault en full-frame** (el subframe andaba): `b64_push` de una fila
+   3840B emite 5120 chars en `out[4096]` → stack smash. Fix: `out[8192]`.
+5. Frames "stale" tras cambiar VMAX (el pipe depth=1 entrega el frame integrado
+   con el timing anterior): flush corto 500ms + 1 descarte si cambió el timing,
+   captura directa si no. Sin esto, una expo de 1ms devolvía el frame saturado
+   de la expo anterior de 1s.
+6. ABORT imposible con worker bloqueante en el thread del cliente → exposición
+   en worker thread dedicado (con generación por slot contra fd reuse).
+
+**Estado final (binario `c3dd2615`, corriendo en device puerto 7624):**
+1ms full → datos reales (0–255, mean ~124-151, unique=256, firma rain-noise);
+2s → saturado 255 (esperado sin lente); subframe 960×540 OK; ABORT → Alert en
+~0.1s sin BLOB; CCD_GAIN 0/30dB OK; MemFree ~34MB con todo corriendo.
+FITS en `/tmp/opencode/indi_*.fits`. golden_sets/ no existe en este checkout
+para comparar (pendiente).
+
+## 2026-09-03 (sigue) — IMX662 SIN termómetro: se elimina CCD_TEMPERATURE
+
+**Cambió:** El usuario preguntó por el sensor de temperatura. Verificado en
+`imx662_docs/`: el register map (689 filas/modo) no tiene registros TEMP, el
+SRM (24 págs) no menciona "temperature" y el datasheet solo da el rango
+operativo (−30..+85°C, spec, sin readout). El `0x014A/B` que leíamos era
+convención de otros Sony y devolvía 0x00 (0.00°C falso). Tampoco hay
+`thermal_zone` del SoC en este kernel. Se eliminó la propiedad
+CCD_TEMPERATURE de los defs, el update post-exposición y la tarjeta FITS
+CCD-TEMP. Binario `9bbdbc40` corriendo en device (defs 3767→3513 B, resto
+sin regresión: 1ms rain-noise OK).
+
 ## 2026-08-22 (noche) — FIX: CONFIG no conmutaba RAW→H265 (decoder bloqueado)
 
 **Cambió:** Tras el fix anterior el viewer arrancaba bien en RAW, pero al apretar
