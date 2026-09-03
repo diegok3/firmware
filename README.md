@@ -36,6 +36,32 @@ I2C bus 0 (addr `0x1a`), with `INCK_SEL=0x03` (27 MHz) and
 > Note: OpenIPC's upstream master also carries an AHD/single-lane config for this
 > sensor family; this branch is the tested reference for the 1-lane hardware above.
 
+## INDI astronomy camera (IMX662)
+
+This branch turns the module into an INDI camera for astrophotography,
+controllable from Ekos/KStars. No `libindi` on the camera: `utils/indi_mini.c`
+is a minimal INDI server (port 7624, device `IMX662 CCD`) that reuses the
+verified RAW path (MIPI → VI ISP-bypass → 1920x1080 raw12).
+
+**On the camera** (autostart via `/etc/init.d/S96indi_mini` → `/usr/app/indi_mini
+--preset validated --port 7624`):
+```bash
+/etc/init.d/S96indi_mini {start|stop|restart}
+tail -f /tmp/indi_mini.log
+```
+
+**In Ekos**: add a remote INDI server (`192.168.1.16:7624`), connect device
+`IMX662 CCD`, then Preview/capture as with any CCD. Exposed properties:
+exposure (0.001–25 s, real VMAX timing), abort, frame type (Light/Bias/Dark/Flat),
+software crop, **binning 1x1/2x2** (use 2x2 for fast focus/framing, 1x1 for
+photometry), gain (0–54 dB), upload mode, module temperature (NTC, relative
+reading), and `CCD1` delivering the image as FITS (16-bit, RGGB Bayer,
+2.9 µm pixels, with `XPIXSZ`/`XBINNING` cards for plate-solving).
+
+Build: `utils/build_indi_mini.sh` (plus `gcc -DINDI_SELFTEST` host self-test).
+See `CHANGELOG.md` (2026-09-03: Ekos quirks fixed) and `utils/i2c_peek.c`
+for live sensor diagnostics.
+
 ## Support
 
 OpenIPC offers two levels of support.
